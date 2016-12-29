@@ -3,7 +3,7 @@
 
   <groupId>com.distelli.objectStore</groupId>
   <artifactId>object-store-api</artifactId>
-  <version>1.0.0</version>
+  <version>1.0.1-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <name>object-store-api</name>
@@ -11,7 +11,7 @@
   <parent>
     <groupId>com.distelli.common</groupId>
     <artifactId>distelli-common-pom</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1-SNAPSHOT</version>
   </parent>
 
   <build>
