@@ -82,7 +82,10 @@ public class TestObjectStore {
         objectStore = objectStoreFactory.create().build();
         switch ( osProvider ) {
         case S3:
-            bucketName = "distelli-unit-test";
+            bucketName = System.getenv("S3_BUCKET");
+            if ( null == bucketName ) {
+                throw new IllegalStateException("Please set the S3_BUCKET environment variable to the test S3 bucket");
+            }
             break;
         default:
             throw new IllegalStateException("Unexpected ObjectStoreType="+osProvider);
@@ -312,11 +315,11 @@ TODO: Use http-client to do a request:
         try {
             Set<String> expect = new HashSet<>();
             for ( int i=0; i < max; i++ ) {
-                key.key(String.format("test-list/test-%03d", i));
+                key.setKey(String.format("test-list/test-%03d", i));
                 expect.add(key.getKey());
                 objectStore.put(key, empty);
             }
-            key.key("test-list/");
+            key.setKey("test-list/");
             Set<String> seen = new HashSet<>();
             for ( PageIterator it : new PageIterator().pageSize(5) ) {
                 for ( ObjectKey meta : objectStore.list(key, it) ) {
@@ -327,7 +330,7 @@ TODO: Use http-client to do a request:
             assertEquals(expect, seen);
         } finally {
             for ( int i=0; i < max; i++ ) {
-                key.key(String.format("test-list/test-%03d", i));
+                key.setKey(String.format("test-list/test-%03d", i));
                 objectStore.delete(key);
             }
         }

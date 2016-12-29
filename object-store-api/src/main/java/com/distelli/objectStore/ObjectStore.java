@@ -39,6 +39,7 @@ public interface ObjectStore {
     /**
      * Get object with objectKey from offset start to end, streaming it into the objectReader.
      *
+     * @param <T> - the return type of the object reader.
      * @param objectKey - the key of the object to fetch.
      * @param objectReader - the reader that will handle the results.
      * @param start - the offset start (or null to start at the beginning).

@@ -1,4 +1,4 @@
-PACKAGE_NAME=persistence-pom
+PACKAGE_NAME=distelli-common-pom
 SHELL := /bin/bash
 .SILENT:
 .PHONY: has-distelli-config git-has-pushed git-is-clean
@@ -7,15 +7,6 @@ all:
 
 install: has-distelli-config
 	. ~/.distelli.config && mvn -q install
-
-# ~/.distelli.config
-# Should contain:
-# export MYSQL_ENDPOINT="mysql://<DBENDPOINT>"
-# export MYSQL_CREDS="<USERNAME>=<PASSWD>"
-# export DDB_ENDPOINT="ddb://us-east-1"
-# export DDB_CREDS="<KEY_ID>=<SECRET_KEY>"
-# ...totally insecure test key (used for encrypting in the test DB):
-# export DB_KEY="AQIDBAUGBwgJCgsMDQ4PEA=="
 
 test: has-distelli-config
 	. ~/.distelli.config && mvn -q -Dsurefire.useFile=false test
@@ -32,14 +23,9 @@ show-deps:
 has-distelli-config:
 	if ! [ -e ~/.distelli.config ]; then \
 		echo 'Please create ~/.distelli.config with this content:' 1>&2; \
-		echo 'export MYSQL_ENDPOINT="mysql://<DBENDPOINT>"' 1>&2; \
-		echo 'export MYSQL_CREDS="<USERNAME>=<PASSWD>"' 1>&2; \
-		echo 'export DDB_ENDPOINT="ddb://us-east-1"' 1>&2; \
-		echo 'export DDB_CREDS="<KEY_ID>=<SECRET_KEY>"' 1>&2; \
-		echo 'export DB_KEY="<TEST_KEY>"' 1>&2; \
-		echo 'export KMS_ENDPOINT="kms://us-east-1"' 1>&2; \
-		echo 'export KMS_CREDS="$$DDB_CREDS"' 1>&2; \
-		echo 'export KMS_KEY="$$(aws kms encrypt --key-id arn:aws:kms:... --plaintext fileb://test-key.aes)"' 1>&2; \
+		echo 'export S3_ENDPOINT="ddb://us-east-1"' 1>&2; \
+		echo 'export S3_BUCKET="distelli-unit-test"' 1>&2; \
+		echo 'export S3_CREDS="<KEY_ID>=<SECRET_KEY>"' 1>&2; \
 		false; \
 	fi
 
