@@ -48,4 +48,3 @@ publish: has-distelli-config git-is-clean git-is-master
 		mvn versions:set -DnewVersion=$$(echo $(NEW_VERSION) | awk -F. '{OFS=".";$$NF=$$(NF)+1;print $$0}')-SNAPSHOT && \
 		git commit -am '[skip ci][release:perform] prepare for next development iteration' && \
 		git push --follow-tags
-

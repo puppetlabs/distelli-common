@@ -167,7 +167,7 @@ TODO: Use http-client to do a request:
         } finally {
             objectStore.delete(key);
         }
-        
+
     }
 
     @Test(expected=AccessControlException.class)
@@ -284,7 +284,7 @@ TODO: Use http-client to do a request:
         }
         fail("Expected AccessControlException or EntityNotFoundException exception");
     }
-    
+
     // Do not want to throw...
     @Test
     public void testBadKeyDelete() throws Exception {

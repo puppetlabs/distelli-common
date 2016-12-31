@@ -1,10 +1,13 @@
 package com.distelli.objectStore.impl;
 
+import java.io.File;
+import java.net.URI;
+import javax.inject.Inject;
+
+import com.distelli.cred.CredProvider;
 import com.distelli.objectStore.*;
 import com.distelli.objectStore.impl.s3.S3ObjectStore;
-import java.net.URI;
-import com.distelli.cred.CredProvider;
-import javax.inject.Inject;
+import com.distelli.objectStore.impl.disk.DiskObjectStore;
 
 public class ObjectStoreBuilder implements ObjectStore.Builder {
     private URI endpoint;
@@ -13,6 +16,7 @@ public class ObjectStoreBuilder implements ObjectStore.Builder {
     private ObjectStoreType objectStoreProvider = ObjectStoreType.S3;
     private Boolean serverSideEncryption;
     private Boolean forceV4Signature;
+    private File diskStorageRoot;
 
     public interface Factory {
         public ObjectStoreBuilder create();
@@ -20,6 +24,8 @@ public class ObjectStoreBuilder implements ObjectStore.Builder {
 
     @Inject
     private S3ObjectStore.Factory _s3Factory;
+    @Inject
+    private DiskObjectStore.Factory _diskFactory;
 
     @Override
     public ObjectStore.Builder withEndpoint(URI endpoint) {
@@ -58,12 +64,29 @@ public class ObjectStoreBuilder implements ObjectStore.Builder {
     }
 
     @Override
+    public ObjectStore.Builder withDiskStorageRoot(File diskStorageRoot) {
+        this.diskStorageRoot = diskStorageRoot;
+        return this;
+    }
+
+    @Override
     public ObjectStore build() {
         switch ( objectStoreProvider ) {
         case S3:
-        default:
             return _s3Factory.create(this);
+        case DISK:
+            return _diskFactory.create(this);
+        default:
+            throw(new RuntimeException("Unsupported ObjectStore Provider: "+objectStoreProvider));
         }
+    }
+
+    public ObjectStoreType getObjectStoreProvider() {
+        return this.objectStoreProvider;
+    }
+
+    public File getDiskStorageRoot() {
+        return this.diskStorageRoot;
     }
 
     public URI getProxy() {

@@ -13,6 +13,7 @@ import javax.persistence.EntityNotFoundException;
 
 public interface ObjectStore {
     public interface Builder {
+        public Builder withDiskStorageRoot(File dir);
         public Builder withEndpoint(URI endpoint);
         public Builder withCredProvider(CredProvider credProvider);
         public Builder withProxy(URI proxy);
