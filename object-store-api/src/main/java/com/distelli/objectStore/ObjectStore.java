@@ -70,4 +70,52 @@ public interface ObjectStore {
     public List<ObjectKey> list(ObjectKey objectKey, PageIterator iterator) throws EntityNotFoundException, AccessControlException;
     public void delete(ObjectKey objectKey) throws AccessControlException;
     public URI createSignedGet(ObjectKey objectKey, long timeout, TimeUnit unit);
+
+    /**
+     * Create a new multipart PUT.
+     *
+     * @param objectKey is the object key we want to create.
+     *
+     * @return the part key which contains the new upload id.
+     */
+    public ObjectPartKey newMultipartPut(ObjectKey objectKey)
+        throws EntityNotFoundException, AccessControlException;
+
+    /**
+     * PUT an individual part.
+     *
+     * @param partKey as returned from newMultipartPut().
+     *
+     * @param partNum used to sequence the parts uploaded.
+     *
+     * @param InputStream the content to be uploaded.
+     *
+     * @return the "part id" that should be used in completePut().
+     */
+    public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, long contentLength, InputStream in)
+        throws EntityNotFoundException, AccessControlException;
+
+    public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, File in)
+        throws EntityNotFoundException, IOException, AccessControlException;
+
+    public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, byte[] in)
+        throws EntityNotFoundException, AccessControlException;
+
+    /**
+     * Abort a multipart put.
+     *
+     * @param partKey as returned from newMultipartPut().
+     */
+    public void abortPut(ObjectPartKey partKey)
+        throws EntityNotFoundException;
+
+    /**
+     * Abort a multipart put.
+     *
+     * @param partKey as returned from newMultipartPut().
+     *
+     * @param partKeys as returned by calls to multipartPut().
+     */
+    public void completePut(ObjectPartKey partKey, List<ObjectPartId> partKeys)
+        throws EntityNotFoundException;
 }

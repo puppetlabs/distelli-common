@@ -248,6 +248,24 @@ public class S3ObjectStore extends AbstractObjectStore {
         }
     }
 
+    @Override
+    public ObjectPartKey newMultipartPut(ObjectKey objectKey) {
+        return null;
+    }
+
+    @Override
+    public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, long contentLength, InputStream in) {
+        return null;
+    }
+
+    @Override
+    public void abortPut(ObjectPartKey partKey) {
+    }
+
+    @Override
+    public void completePut(ObjectPartKey partKey, List<ObjectPartId> partKeys) {
+    }
+
     private ObjectKey toObjectKey(S3ObjectSummary summary) {
         return ObjectKey.builder()
             .bucket(summary.getBucketName())

@@ -29,8 +29,9 @@ has-distelli-config:
 		false; \
 	fi
 
-#git-has-pushed:
-#	! git diff --stat HEAD origin/master | grep . >/dev/null && [ 0 == $${PIPESTATUS[0]} ]
+git-pull-needed:
+	git remote update
+	[ $$(git rev-parse '@{u}') = $$(git merge-base '@' '@{u}') ]
 
 git-is-clean:
 	git diff-index --quiet HEAD --
@@ -38,13 +39,15 @@ git-is-clean:
 git-is-master:
 	[ master = "$$(git rev-parse --abbrev-ref HEAD)" ]
 
-publish: has-distelli-config git-is-clean git-is-master
+NEXT_SNAPSHOT=$$(echo $(NEW_VERSION) | awk -F. '{OFS=".";$$NF=$$(NF)+1;print $$0}')-SNAPSHOT
+
+publish: has-distelli-config git-is-clean git-is-master git-pull-needed
 	if [ -z "$(NEW_VERSION)" ]; then echo 'Please run `make publish NEW_VERSION=1.1`' 1>&2; false; fi
 	. ~/.distelli.config && \
-		mvn versions:set -DnewVersion=$(NEW_VERSION) && \
+		mvn versions:set -DgenerateBackupPoms=false -DnewVersion=$(NEW_VERSION) && \
 		git commit -am '[skip ci][release:prepare] prepare release $(PACKAGE_NAME)-$(NEW_VERSION)' && \
 		git tag -m 'Preparing new release $(PACKAGE_NAME)-$(NEW_VERSION)' -a '$(PACKAGE_NAME)-$(NEW_VERSION)' && \
 		mvn clean test deploy && \
-		mvn versions:set -DnewVersion=$$(echo $(NEW_VERSION) | awk -F. '{OFS=".";$$NF=$$(NF)+1;print $$0}')-SNAPSHOT && \
+		mvn versions:set -DgenerateBackupPoms=false -DnewVersion=$(NEXT_SNAPSHOT) && \
 		git commit -am '[skip ci][release:perform] prepare for next development iteration' && \
 		git push --follow-tags

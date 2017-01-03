@@ -241,7 +241,26 @@ public class DiskObjectStore extends AbstractObjectStore
         if(!objFile.exists())
             throw(new EntityNotFoundException("NotFound: "+objectKey));
 
+        // TODO: This is broken. We should probably just throw UnsupportedOperationException...
         return URI.create("file:///"+objectKey.getBucket()+"/"+toKeyId(objectKey.getKey()));
+    }
+
+    @Override
+    public ObjectPartKey newMultipartPut(ObjectKey objectKey) {
+        return null;
+    }
+
+    @Override
+    public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, long contentLength, InputStream in) {
+        return null;
+    }
+
+    @Override
+    public void abortPut(ObjectPartKey partKey) {
+    }
+
+    @Override
+    public void completePut(ObjectPartKey partKey, List<ObjectPartId> partKeys) {
     }
 
     private boolean isPrefixMatch(ObjectKey key, ObjectKey prefix)

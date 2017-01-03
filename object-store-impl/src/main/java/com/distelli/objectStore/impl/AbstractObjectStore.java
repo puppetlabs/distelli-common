@@ -43,6 +43,19 @@ public abstract class AbstractObjectStore implements ObjectStore {
     abstract public URI createSignedGet(ObjectKey objectKey, long timeout, TimeUnit unit) throws EntityNotFoundException;
 
     @Override
+    abstract public ObjectPartKey newMultipartPut(ObjectKey objectKey);
+
+
+    @Override
+    abstract public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, long contentLength, InputStream in);
+
+    @Override
+    abstract public void abortPut(ObjectPartKey partKey);
+
+    @Override
+    abstract public void completePut(ObjectPartKey partKey, List<ObjectPartId> partKeys);
+
+    @Override
     public void put(ObjectKey objectKey, File in) throws IOException {
         put(objectKey, in.length(), new FileInputStream(in));
     }
@@ -65,4 +78,15 @@ public abstract class AbstractObjectStore implements ObjectStore {
     public void get(ObjectKey objectKey, File file) throws EntityNotFoundException, IOException {
         get(objectKey, (meta, is) -> Files.copy(is, file.toPath()));
     }
+
+    @Override
+    public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, File in) throws IOException {
+        return multipartPut(partKey, partNum, in.length(), new FileInputStream(in));
+    }
+
+    @Override
+    public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, byte[] in) {
+        return multipartPut(partKey, partNum, in.length, new ByteArrayInputStream(in));
+    }
+
 }
