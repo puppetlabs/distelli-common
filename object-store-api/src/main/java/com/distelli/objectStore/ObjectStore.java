@@ -53,6 +53,7 @@ public interface ObjectStore {
      *         the final checksum does not match the expected checksum. This
      *         check may be disabled in various scenarios depending on the
      *         underlying implementation.
+     * @return Returns the result of ObjectReader
      */
     public <T> T get(ObjectKey objectKey, ObjectReader<T> objectReader, Long start, Long end)
         throws EntityNotFoundException, IOException, AccessControlException, StreamCorruptedException;
@@ -88,7 +89,7 @@ public interface ObjectStore {
      *
      * @param partNum used to sequence the parts uploaded.
      *
-     * @param InputStream the content to be uploaded.
+     * @param in the content to be uploaded.
      *
      * @return the "part id" that should be used in completePut().
      */
@@ -116,7 +117,7 @@ public interface ObjectStore {
      *
      * @param partKeys as returned by calls to multipartPut().
      *
-     * @throws ChunkToSmallException if an individual part is < 5MB (unless it is the last chunk).
+     * @throws ChunkToSmallException if an individual part is &lt; 5MB (unless it is the last chunk).
      */
     public void completePut(ObjectPartKey partKey, List<ObjectPartId> partKeys)
         throws EntityNotFoundException, ChunkToSmallException;
