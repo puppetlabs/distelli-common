@@ -8,7 +8,13 @@ import com.amazonaws.services.s3.model.GetObjectRequest;
 import com.amazonaws.services.s3.model.ListObjectsV2Request;
 import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.S3Object;
+import com.amazonaws.services.s3.model.InitiateMultipartUploadRequest;
+import com.amazonaws.services.s3.model.UploadPartResult;
+import com.amazonaws.services.s3.model.UploadPartRequest;
+import com.amazonaws.services.s3.model.AbortMultipartUploadRequest;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
+import com.amazonaws.services.s3.model.PartETag;
+import com.amazonaws.services.s3.model.CompleteMultipartUploadRequest;
 import com.distelli.aws.AWSCredentialsProviderFactory;
 import com.distelli.aws.AmazonWebServiceClients;
 import com.distelli.aws.ClientConfigurations;
@@ -33,6 +39,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.ArrayList;
 import javax.inject.Inject;
 import javax.persistence.EntityNotFoundException;
 import static javax.xml.bind.DatatypeConverter.parseHexBinary;
@@ -112,16 +119,6 @@ public class S3ObjectStore extends AbstractObjectStore {
         } catch ( IOException ex ) {
             throw new RuntimeException(ex);
         }
-    }
-
-    private void handleAmazonS3Exception(AmazonS3Exception ex, ObjectKey objectKey) {
-        switch ( ex.getStatusCode() ) {
-        case 404: throw new EntityNotFoundException("NotFound: "+objectKey+" endpoint="+endpoint);
-        case 401:
-        case 403:
-            throw new AccessControlException("Access denied to "+objectKey+" endpoint="+endpoint);
-        }
-        throw ex;
     }
 
     @Override
@@ -250,21 +247,105 @@ public class S3ObjectStore extends AbstractObjectStore {
 
     @Override
     public ObjectPartKey newMultipartPut(ObjectKey objectKey) {
-        return null;
+        InitiateMultipartUploadRequest req = new InitiateMultipartUploadRequest(
+            objectKey.getBucket(), objectKey.getKey());
+        if ( serverSideEncryption ) {
+            com.amazonaws.services.s3.model.ObjectMetadata meta =
+                new com.amazonaws.services.s3.model.ObjectMetadata();
+            meta.setSSEAlgorithm(com.amazonaws.services.s3.model.ObjectMetadata.AES_256_SERVER_SIDE_ENCRYPTION);
+            req.setObjectMetadata(meta);
+        }
+        String uploadId = null;
+        try {
+            uploadId = amazonS3.initiateMultipartUpload(req).getUploadId();
+        } catch ( AmazonS3Exception ex ) {
+            handleAmazonS3Exception(ex, objectKey);
+        }
+        return ObjectPartKey.builder()
+            .key(objectKey.getKey())
+            .bucket(objectKey.getBucket())
+            .uploadId(uploadId)
+            .build();
     }
 
     @Override
     public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, long contentLength, InputStream in) {
-        return null;
+        UploadPartResult result = null;
+        try {
+            result =
+                amazonS3.uploadPart(
+                    new UploadPartRequest()
+                    .withBucketName(partKey.getBucket())
+                    .withInputStream(in)
+                    .withKey(partKey.getKey())
+                    .withPartNumber(partNum)
+                    .withPartSize(contentLength)
+                    .withUploadId(partKey.getUploadId()));
+        } catch ( AmazonS3Exception ex ) {
+            handleAmazonS3Exception(ex, partKey);
+        }
+        return ObjectPartId.builder()
+            .partNum(partNum)
+            .partId(result.getETag())
+            .build();
     }
 
     @Override
     public void abortPut(ObjectPartKey partKey) {
+        try {
+            amazonS3.abortMultipartUpload(
+                new AbortMultipartUploadRequest(
+                    partKey.getBucket(),
+                    partKey.getKey(),
+                    partKey.getUploadId()));
+        } catch ( AmazonS3Exception ex ) {
+            handleAmazonS3Exception(ex, partKey);
+        }
     }
 
     @Override
-    public void completePut(ObjectPartKey partKey, List<ObjectPartId> partKeys) {
+    public void completePut(ObjectPartKey partKey, List<ObjectPartId> partIds) {
+        List<PartETag> partETags = new ArrayList<>(partIds.size());
+        for ( ObjectPartId partId : partIds ) {
+            partETags.add(new PartETag(partId.getPartNum(), partId.getPartId()));
+        }
+        try {
+            amazonS3.completeMultipartUpload(
+                new CompleteMultipartUploadRequest()
+                .withBucketName(partKey.getBucket())
+                .withKey(partKey.getKey())
+                .withUploadId(partKey.getUploadId())
+                .withPartETags(partETags));
+        } catch ( AmazonS3Exception ex ) {
+            handleAmazonS3Exception(ex, partKey);
+        }
     }
+
+    private void handleAmazonS3Exception(AmazonS3Exception ex, ObjectKey objectKey) {
+        switch ( ex.getStatusCode() ) {
+        case 404: throw new EntityNotFoundException("NotFound: "+objectKey+" endpoint="+endpoint);
+        case 401:
+        case 403:
+            throw new AccessControlException("Access denied to "+objectKey+" endpoint="+endpoint);
+        }
+        throw ex;
+    }
+
+    private void handleAmazonS3Exception(AmazonS3Exception ex, ObjectPartKey objectPartKey) {
+        switch ( ex.getStatusCode() ) {
+        case 400:
+            if ( "EntityTooSmall".equals(ex.getErrorCode()) ) {
+                throw new ChunkToSmallException("ChunkToSmall: "+objectPartKey+" endpoint="+endpoint, ex);
+            }
+            break;
+        case 404: throw new EntityNotFoundException("NotFound: "+objectPartKey+" endpoint="+endpoint);
+        case 401:
+        case 403:
+            throw new AccessControlException("AccessDenied: "+objectPartKey+" endpoint="+endpoint);
+        }
+        throw ex;
+    }
+
 
     private ObjectKey toObjectKey(S3ObjectSummary summary) {
         return ObjectKey.builder()

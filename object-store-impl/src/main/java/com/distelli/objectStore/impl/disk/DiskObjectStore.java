@@ -241,7 +241,6 @@ public class DiskObjectStore extends AbstractObjectStore
         if(!objFile.exists())
             throw(new EntityNotFoundException("NotFound: "+objectKey));
 
-        // TODO: This is broken. We should probably just throw UnsupportedOperationException...
         return URI.create("file:///"+objectKey.getBucket()+"/"+toKeyId(objectKey.getKey()));
     }
 

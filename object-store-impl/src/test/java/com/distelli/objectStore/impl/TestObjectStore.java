@@ -29,6 +29,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.persistence.EntityNotFoundException;
+import java.util.List;
+import java.util.ArrayList;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.rules.TestName;
@@ -369,5 +371,56 @@ TODO: Use http-client to do a request:
             failed = true;
         }
         assertTrue(failed);
+    }
+
+    @Test
+    public void testMulitpartPut() throws Exception {
+        long time = System.currentTimeMillis();
+        ObjectKey key = ObjectKey.builder()
+            .bucket(bucketName)
+            .key("TestKey-"+time)
+            .build();
+
+        byte[] chunk = new byte[5*1048576];
+
+        // start put:
+        ObjectPartKey partKey = null;
+        try {
+            partKey = objectStore.newMultipartPut(key);
+            List<ObjectPartId> partIds = new ArrayList<>();
+            Arrays.fill(chunk, (byte)'a');
+            partIds.add(objectStore.multipartPut(partKey, 1, chunk));
+            Arrays.fill(chunk, (byte)'b');
+            partIds.add(objectStore.multipartPut(partKey, 2, chunk));
+            partIds.add(objectStore.multipartPut(partKey, 3, new byte[]{(byte)'c'}));
+
+            objectStore.completePut(partKey, partIds);
+
+            partKey = null;
+
+            //now get the data
+            objectStore.get(key, (meta, is) -> {
+                    for ( int i=0; i < chunk.length; i++ ) {
+                        assertEquals(is.read(), (int)'a');
+                    }
+                    for ( int i=0; i < chunk.length; i++ ) {
+                        assertEquals(is.read(), (int)'b');
+                    }
+                    assertEquals(is.read(), (int)'c');
+                    assertEquals(is.read(), -1);
+                    return null;
+                });
+
+            //now get the object details
+            ObjectMetadata meta = objectStore.head(key);
+            assertEquals(2*chunk.length+1, Math.toIntExact(meta.getContentLength()));
+            assertEquals(key.getKey(), meta.getKey());
+            assertEquals(key.getBucket(), meta.getBucket());
+        } finally {
+            // Maybe abort the multi-part request.
+            if ( null != partKey ) objectStore.abortPut(partKey);
+            //delete the key
+            objectStore.delete(key);
+        }
     }
 }

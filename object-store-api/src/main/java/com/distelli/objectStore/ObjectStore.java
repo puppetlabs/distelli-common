@@ -110,12 +110,14 @@ public interface ObjectStore {
         throws EntityNotFoundException;
 
     /**
-     * Abort a multipart put.
+     * Complete a multipart put.
      *
      * @param partKey as returned from newMultipartPut().
      *
      * @param partKeys as returned by calls to multipartPut().
+     *
+     * @throws ChunkToSmallException if an individual part is < 5MB (unless it is the last chunk).
      */
     public void completePut(ObjectPartKey partKey, List<ObjectPartId> partKeys)
-        throws EntityNotFoundException;
+        throws EntityNotFoundException, ChunkToSmallException;
 }
