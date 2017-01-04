@@ -12,6 +12,7 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.eclipse.jetty.server.handler.ErrorHandler;
 
 public class WebServer implements Runnable
 {
@@ -22,6 +23,7 @@ public class WebServer implements Runnable
     private Map<String, ServletHolder> _standardServlets = null;
     private String _path = null;
     private int _sessionMaxAge = 2592000; //default is 30 days
+    private ErrorHandler _errorHandler = null;
 
     public WebServer(int port, WebServlet appServlet, String path)
     {
@@ -47,6 +49,11 @@ public class WebServer implements Runnable
         if(_standardServlets == null)
             _standardServlets = new HashMap<String, ServletHolder>();
         _standardServlets.put(path, servletHolder);
+    }
+
+    public void setErrorHandler(ErrorHandler errorHandler)
+    {
+        _errorHandler = errorHandler;
     }
 
     public void run()
@@ -85,6 +92,9 @@ public class WebServer implements Runnable
                     context.addServlet(holder, path);
                 }
             }
+
+            if(_errorHandler != null)
+                context.setErrorHandler(_errorHandler);
 
             server.start();
             server.join();
