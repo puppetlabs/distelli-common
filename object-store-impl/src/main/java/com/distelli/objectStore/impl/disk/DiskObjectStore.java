@@ -7,6 +7,9 @@
 */
 package com.distelli.objectStore.impl.disk;
 
+import java.util.function.Function;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Arrays;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -146,10 +149,10 @@ public class DiskObjectStore extends AbstractObjectStore
     {
         File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
         if(!bucketRoot.exists())
-            throw(new EntityNotFoundException("NotFound: "+objectKey));
+            throw(new EntityNotFoundException("NotFound: "+objectKey+" bucketsRoot="+_bucketsRoot));
         File objFile = new File(bucketRoot, toKeyId(objectKey.getKey()));
         if(!objFile.exists())
-            throw(new EntityNotFoundException("NotFound: "+objectKey));
+            throw(new EntityNotFoundException("NotFound: "+objectKey+" bucketsRoot="+_bucketsRoot));
         FileInputStream fileIn = new FileInputStream(objFile);
         if(start != null)
             fileIn.skip(start.longValue());
@@ -172,45 +175,41 @@ public class DiskObjectStore extends AbstractObjectStore
         return objectReader.read(objectMetadata, in);
     }
 
-    /**
-       This implementation of list is not well suited for large object
-       stores. It reads the entire subtree rooted at the parent of
-       objectKey into memory, sorts it and then returns the list of
-       objects that match the constraints specified by the
-       PageIterator.
-
-       If the object store is really large this will cause an OOM. For
-       large object stores please use S3.
-    */
     @Override
     public List<ObjectKey> list(ObjectKey objectKey, PageIterator iterator)
     {
         final List<ObjectKey> keys = new ArrayList<ObjectKey>();
         File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
-        if(!bucketRoot.exists())
-            return keys;
+        if(!bucketRoot.exists()) {
+            throw new EntityNotFoundException("NotFound: "+objectKey+" bucketsRoot="+_bucketsRoot);
+        }
 
         final File objFile = new File(bucketRoot, objectKey.getKey());
         File parentDir = objFile.getParentFile();
-        if(parentDir == null | !parentDir.exists())
+        if(parentDir == null || !parentDir.exists()) {
+            iterator.setMarker(null);
             return keys;
-        Path start = parentDir.toPath();
-        try {
-            Files.walk(start,100)
-            .sorted()
-            .forEach((item) -> {
-                    File file = item.toFile();
-                    if(!file.isDirectory())
-                    {
-                        ObjectKey oKey = toObjectkey(file);
-                        if(isPrefixMatch(oKey, objectKey))
-                            keys.add(oKey);
-                    }
-                });
-            return keys;
-        } catch(Throwable t) {
-            throw(new RuntimeException(t));
         }
+
+        File afterFile = null;
+        if ( null != iterator.getMarker() ) {
+            afterFile = new File(iterator.getMarker());
+        }
+
+        AtomicInteger remaining = new AtomicInteger(iterator.getPageSize());
+        if ( walk(parentDir, objFile.getName(), 0, afterFile, (file) -> {
+                    ObjectKey elm = toObjectkey(file);
+                    if ( remaining.getAndDecrement() <= 0 ) {
+                        iterator.setMarker(elm.getKey());
+                        return false;
+                    }
+                    keys.add(elm);
+                    return true;
+                }) )
+        {
+            iterator.setMarker(null);
+        }
+        return keys;
     }
 
     @Override
@@ -220,10 +219,11 @@ public class DiskObjectStore extends AbstractObjectStore
         try {
             File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
             if(!bucketRoot.exists())
-                throw(new EntityNotFoundException("NotFound: "+objectKey));
+                throw(new EntityNotFoundException("NotFound: "+objectKey+" bucketsRoot="+_bucketsRoot));
             File objFile = new File(bucketRoot, toKeyId(objectKey.getKey()));
-            if(!objFile.exists())
-                throw(new EntityNotFoundException("NotFound: "+objectKey));
+            // May have already been deleted concurrently, so we ignore this which
+            // is consistent with S3 behavior.
+            if(!objFile.exists()) return;
             Files.delete(objFile.toPath());
         } catch(IOException ioe) {
             throw(new RuntimeException(ioe));
@@ -234,14 +234,11 @@ public class DiskObjectStore extends AbstractObjectStore
     public URI createSignedGet(ObjectKey objectKey, long timeout, TimeUnit unit)
         throws EntityNotFoundException
     {
+        // S3 never checks if these paths exist, it simply returns a string with
+        // credentials:
         File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
-        if(!bucketRoot.exists())
-            throw(new EntityNotFoundException("NotFound: "+objectKey));
         File objFile = new File(bucketRoot, toKeyId(objectKey.getKey()));
-        if(!objFile.exists())
-            throw(new EntityNotFoundException("NotFound: "+objectKey));
-
-        return URI.create("file:///"+objectKey.getBucket()+"/"+toKeyId(objectKey.getKey()));
+        return URI.create("file://"+objFile.getAbsoluteFile().getAbsolutePath());
     }
 
     @Override
@@ -262,23 +259,64 @@ public class DiskObjectStore extends AbstractObjectStore
     public void completePut(ObjectPartKey partKey, List<ObjectPartId> partKeys) {
     }
 
-    private boolean isPrefixMatch(ObjectKey key, ObjectKey prefix)
-    {
-        String keyBucket = key.getBucket();
-        String prefixBucket = prefix.getBucket();
-        if(!keyBucket.equals(prefixBucket))
-            return false;
-        String keyKey = key.getKey();
-        String prefixKey = prefix.getKey();
-        if(prefixKey.isEmpty() || prefixKey.equals("/"))
-            return true;
-        if(prefixKey.startsWith("/"))
-            prefixKey = prefixKey.substring(1);
-        if(keyKey.startsWith(prefixKey))
-            return true;
-        return false;
-    }
+    /**
+     * NOTE: This method does NOT check for symlink loops, therefore it could go into infinite recursion!
+     *
+     * @param root is the place to begin the walk.
+     *
+     * @param startsWith if non-null, the first files must begin with this string.
+     *
+     * @param depth is how many directories deep we have walked. Initially this should be zero.
+     *
+     * @param afterFile is the path relative to the root of where to begin the
+     *     file walking.
+     *
+     * @param visitor is called when visiting each file. The walk is stopped if false is returned.
+     *
+     * @return false to indicate the walk was prematurely terminated by visitor returning false.
+     */
+    private static boolean walk(File root, String startsWith, int depth, File afterFile, Function<File, Boolean> visitor) {
+        File[] list;
+        String afterFileName = null;
+        if ( null != afterFile ) {
+            int afterFileDepth = 0;
+            for ( File cur=afterFile; cur != null; cur = cur.getParentFile() ) {
+                afterFileDepth++;
+            }
+            afterFileDepth -= depth;
+            if ( afterFileDepth > 0 ) {
+                File afterFileForDepth = afterFile;
+                while ( --afterFileDepth > 0 ) {
+                    afterFileForDepth = afterFileForDepth.getParentFile();
+                }
+                afterFileName = afterFileForDepth.getName();
+            }
+        }
+        if ( null != afterFileName || null != startsWith ) {
+            final String finalFileName = afterFileName;
+            list = root.listFiles((dir, name) -> {
+                    return
+                    ( null == finalFileName || name.compareTo(finalFileName) >= 0 ) &&
+                    ( null == startsWith || name.startsWith(startsWith) );
+                });
+        } else {
+            list = root.listFiles();
+        }
+        if ( null == list ) return true;
+        Arrays.sort(list, (file1, file2) -> file1.getName().compareTo(file2.getName()));
 
+        for ( File file : list ) {
+            if ( file.isDirectory() ) {
+                if ( ! walk(new File(root, file.getName()), null, depth+1, afterFile, visitor) ) {
+                    return false;
+                }
+            } else if ( Boolean.FALSE == visitor.apply(file) ) {
+                return false;
+            }
+        }
+        return true;
+    }
+    
     private ObjectKey toObjectkey(File file)
     {
         if(file.isDirectory())

@@ -7,6 +7,7 @@ import com.distelli.cred.CredPair;
 import com.distelli.cred.CredProvider;
 import java.net.URI;
 import java.util.Base64;
+import java.io.File;
 import com.distelli.objectStore.*;
 
 public class ObjectStoreFactoryProvider implements Provider<ObjectStore.Factory> {
@@ -21,6 +22,8 @@ public class ObjectStoreFactoryProvider implements Provider<ObjectStore.Factory>
 
     @Override
     public ObjectStore.Factory get() {
+        if ( ObjectStoreType.DISK == _osType ) return getDisk();
+
         CredPair credPair = getCredPair(_osType);
         URI endpoint = getEndpoint(_osType);
         CredProvider credProvider = () -> credPair;
@@ -29,8 +32,22 @@ public class ObjectStoreFactoryProvider implements Provider<ObjectStore.Factory>
             @Override
             public ObjectStore.Builder create() {
                 return _baseObjectStoreFactory.create()
+                    .withObjectStoreType(ObjectStoreType.S3)
                     .withEndpoint(endpoint)
                     .withCredProvider(credProvider);
+            }
+        };
+    }
+
+    private ObjectStore.Factory getDisk() {
+        File dir =
+            new File(System.getProperty("java.io.tmpdir"), "ObjectStore.Test");
+        return new ObjectStore.Factory() {
+            @Override
+            public ObjectStore.Builder create() {
+                return _baseObjectStoreFactory.create()
+                    .withObjectStoreType(ObjectStoreType.DISK)
+                    .withDiskStorageRoot(dir);
             }
         };
     }
