@@ -187,27 +187,33 @@ public class DiskObjectStore extends AbstractObjectStore
         final File objFile = new File(bucketRoot, objectKey.getKey());
         File parentDir = objFile.getParentFile();
         if(parentDir == null || !parentDir.exists()) {
-            iterator.setMarker(null);
+            if(iterator != null)
+                iterator.setMarker(null);
             return keys;
         }
 
         File afterFile = null;
-        if ( null != iterator.getMarker() ) {
+        if ( null != iterator && null != iterator.getMarker() ) {
             afterFile = new File(iterator.getMarker());
         }
 
-        AtomicInteger remaining = new AtomicInteger(iterator.getPageSize());
+        int pageSize = 10;
+        if(iterator != null)
+            pageSize = iterator.getPageSize();
+        AtomicInteger remaining = new AtomicInteger(pageSize);
         if ( walk(parentDir, objFile.getName(), 0, afterFile, (file) -> {
                     ObjectKey elm = toObjectkey(file);
                     if ( remaining.getAndDecrement() <= 0 ) {
-                        iterator.setMarker(elm.getKey());
+                        if(iterator != null)
+                            iterator.setMarker(elm.getKey());
                         return false;
                     }
                     keys.add(elm);
                     return true;
                 }) )
         {
-            iterator.setMarker(null);
+            if(iterator != null)
+                iterator.setMarker(null);
         }
         return keys;
     }
@@ -316,7 +322,7 @@ public class DiskObjectStore extends AbstractObjectStore
         }
         return true;
     }
-    
+
     private ObjectKey toObjectkey(File file)
     {
         if(file.isDirectory())

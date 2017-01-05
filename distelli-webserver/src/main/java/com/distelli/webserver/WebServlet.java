@@ -126,11 +126,11 @@ public class WebServlet extends HttpServlet
         boolean writeGZipped = false;
         try
         {
-            MatchedRoute route = _routeMatcher.match(httpMethod, request.getRequestURI());
+            requestContext = _requestContextFactory.getRequestContext(httpMethod, request);
+            MatchedRoute route = _routeMatcher.match(httpMethod, requestContext.getPath());
             if(route == null)
                 throw(new IllegalStateException("No Route for Path: "+requestContext.getPath()));
 
-            requestContext = _requestContextFactory.getRequestContext(httpMethod, request);
             webResponse = runFilters(route, requestContext);
             if(webResponse != null)
             {
