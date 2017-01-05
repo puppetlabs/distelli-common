@@ -103,6 +103,13 @@ public class WebServlet extends HttpServlet
         _requestFilters = requestFilters;
     }
 
+    public void setRequestHandlerFactory(RequestHandlerFactory requestHandlerFactory)
+    {
+        if(requestHandlerFactory == null)
+            throw(new IllegalArgumentException("Request Handler Factory cannot be null"));
+        _requestHandlerFactory = requestHandlerFactory;
+    }
+
     public void setRequestContextFactory(RequestContextFactory requestContextFactory)
     {
         if(requestContextFactory == null)
