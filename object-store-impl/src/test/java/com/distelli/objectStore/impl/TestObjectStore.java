@@ -372,8 +372,6 @@ TODO: Use http-client to do a request:
 
     @Test
     public void testMulitpartPut() throws Exception {
-        // TODO: Implement multipart PUT for the disk store...
-        if ( ObjectStoreType.DISK == osProvider ) return;
         long time = System.currentTimeMillis();
         ObjectKey key = ObjectKey.builder()
             .bucket(bucketName)

@@ -7,6 +7,7 @@
 */
 package com.distelli.objectStore.impl.disk;
 
+import java.io.OutputStream;
 import java.util.function.Function;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Arrays;
@@ -26,17 +27,23 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.persistence.EntityNotFoundException;
-
+import java.nio.file.SimpleFileVisitor;
 import com.distelli.objectStore.*;
 import com.distelli.objectStore.impl.AbstractObjectStore;
 import com.distelli.objectStore.impl.ObjectStoreBuilder;
 import com.distelli.persistence.PageIterator;
 import com.google.inject.assistedinject.Assisted;
+import java.util.concurrent.ThreadLocalRandom;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.FileVisitResult;
+import java.nio.file.StandardCopyOption;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class DiskObjectStore extends AbstractObjectStore
 {
     private File _root = null;
     private File _bucketsRoot = null;
+    private File _partsRoot = null;
 
     private static final String KEY_POSTFIX = ".obj";
 
@@ -64,7 +71,12 @@ public class DiskObjectStore extends AbstractObjectStore
         File bucketsRoot = new File(rootDir.getAbsolutePath(), "buckets");
         if(!bucketsRoot.exists())
             bucketsRoot.mkdirs();
+        File partsRoot = new File(rootDir.getAbsolutePath(), "parts");
+        if(!partsRoot.exists())
+            partsRoot.mkdirs();
+
         _bucketsRoot = bucketsRoot;
+        _partsRoot = partsRoot;
         _root = rootDir;
     }
 
@@ -79,6 +91,9 @@ public class DiskObjectStore extends AbstractObjectStore
 
     @Override
     public void createBucket(String bucketName) {
+        if ( ! validFileName(bucketName) ) {
+            throw new IllegalArgumentException("BucketName is invalid "+bucketName);
+        }
         File bucketDir = new File(_bucketsRoot.getAbsolutePath(), bucketName);
         if(bucketDir.exists())
             return;
@@ -87,6 +102,9 @@ public class DiskObjectStore extends AbstractObjectStore
 
     @Override
     public void deleteBucket(String bucketName) throws AccessControlException {
+        if ( ! validFileName(bucketName) ) {
+            throw new IllegalArgumentException("BucketName is invalid "+bucketName);
+        }
         File bucketDir = new File(_bucketsRoot.getAbsolutePath(), bucketName);
         if(!bucketDir.exists())
             return;
@@ -104,6 +122,7 @@ public class DiskObjectStore extends AbstractObjectStore
 
     @Override
     public void put(ObjectKey objectKey, long contentLength, InputStream in) {
+        validate(objectKey);
         File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
         if(!bucketRoot.exists())
             throw(new EntityNotFoundException("Bucket "+objectKey.getBucket()+" does not exist"));
@@ -128,6 +147,7 @@ public class DiskObjectStore extends AbstractObjectStore
     // Returns null if entity does not exist.
     @Override
     public ObjectMetadata head(ObjectKey objectKey) {
+        validate(objectKey);
         File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
         if(!bucketRoot.exists())
             return null;
@@ -147,6 +167,7 @@ public class DiskObjectStore extends AbstractObjectStore
     public <T> T get(ObjectKey objectKey, ObjectReader<T> objectReader, Long start, Long end)
         throws EntityNotFoundException, IOException
     {
+        validate(objectKey);
         File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
         if(!bucketRoot.exists())
             throw(new EntityNotFoundException("NotFound: "+objectKey+" bucketsRoot="+_bucketsRoot));
@@ -178,6 +199,7 @@ public class DiskObjectStore extends AbstractObjectStore
     @Override
     public List<ObjectKey> list(ObjectKey objectKey, PageIterator iterator)
     {
+        validate(objectKey);
         final List<ObjectKey> keys = new ArrayList<ObjectKey>();
         File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
         if(!bucketRoot.exists()) {
@@ -187,33 +209,29 @@ public class DiskObjectStore extends AbstractObjectStore
         final File objFile = new File(bucketRoot, objectKey.getKey());
         File parentDir = objFile.getParentFile();
         if(parentDir == null || !parentDir.exists()) {
-            if(iterator != null)
-                iterator.setMarker(null);
+            iterator.setMarker(null);
             return keys;
         }
 
         File afterFile = null;
-        if ( null != iterator && null != iterator.getMarker() ) {
+        if ( null != iterator.getMarker() ) {
             afterFile = new File(iterator.getMarker());
         }
 
         int pageSize = 10;
-        if(iterator != null)
-            pageSize = iterator.getPageSize();
+        pageSize = iterator.getPageSize();
         AtomicInteger remaining = new AtomicInteger(pageSize);
         if ( walk(parentDir, objFile.getName(), 0, afterFile, (file) -> {
                     ObjectKey elm = toObjectkey(file);
                     if ( remaining.getAndDecrement() <= 0 ) {
-                        if(iterator != null)
-                            iterator.setMarker(elm.getKey());
+                        iterator.setMarker(elm.getKey());
                         return false;
                     }
                     keys.add(elm);
                     return true;
                 }) )
         {
-            if(iterator != null)
-                iterator.setMarker(null);
+            iterator.setMarker(null);
         }
         return keys;
     }
@@ -222,6 +240,7 @@ public class DiskObjectStore extends AbstractObjectStore
     public void delete(ObjectKey objectKey)
         throws EntityNotFoundException
     {
+        validate(objectKey);
         try {
             File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
             if(!bucketRoot.exists())
@@ -240,6 +259,7 @@ public class DiskObjectStore extends AbstractObjectStore
     public URI createSignedGet(ObjectKey objectKey, long timeout, TimeUnit unit)
         throws EntityNotFoundException
     {
+        validate(objectKey);
         // S3 never checks if these paths exist, it simply returns a string with
         // credentials:
         File bucketRoot = new File(_bucketsRoot, objectKey.getBucket());
@@ -249,20 +269,176 @@ public class DiskObjectStore extends AbstractObjectStore
 
     @Override
     public ObjectPartKey newMultipartPut(ObjectKey objectKey) {
-        return null;
+        try {
+            return newMultipartPutThrows(objectKey);
+        } catch ( RuntimeException ex) {
+            throw ex;
+        } catch ( Exception ex ) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    private ObjectPartKey newMultipartPutThrows(ObjectKey objectKey) throws IOException {
+        validate(objectKey);
+        Path uploadDir = null;
+        try {
+            uploadDir = Files.createTempDirectory(_partsRoot.toPath(), null);
+            Files.write(
+                Paths.get(uploadDir.toString(), ".KEY"),
+                (objectKey.getBucket()+"/"+objectKey.getKey()).getBytes(UTF_8));
+        } catch ( RuntimeException ex) {
+            throw ex;
+        } catch ( Exception ex ) {
+            throw new RuntimeException(ex);
+        }
+        return ObjectPartKey.builder()
+            .bucket(objectKey.getBucket())
+            .key(objectKey.getKey())
+            .uploadId(uploadDir.getFileName().toString())
+            .build();
     }
 
     @Override
     public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, long contentLength, InputStream in) {
-        return null;
+        try {
+            return multipartPutThrows(partKey, partNum, contentLength, in);
+        } catch ( RuntimeException ex) {
+            throw ex;
+        } catch ( Exception ex ) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    private ObjectPartId multipartPutThrows(ObjectPartKey partKey, int partNum, long contentLength, InputStream in) throws IOException {
+        if ( partNum < 1 || partNum > 10000 ) {
+            throw new IllegalArgumentException("partNum must be between 1-10000 got="+partNum);
+        }
+        Path uploadDir = getUploadDir(partKey);
+        Path uploadFile = Files.createTempFile(uploadDir, null, String.format(".part%04d", partNum));
+        boolean success = false;
+        try {
+            Files.copy(in, uploadFile, StandardCopyOption.REPLACE_EXISTING);
+            success = true;
+        } finally {
+            if ( ! success ) Files.deleteIfExists(uploadFile);
+        }
+        String partId = uploadFile.getFileName().toString();
+        partId = partId.substring(0, partId.lastIndexOf('.'));
+        return ObjectPartId.builder()
+            .partNum(partNum)
+            .partId(partId)
+            .build();
     }
 
     @Override
     public void abortPut(ObjectPartKey partKey) {
+        try {
+            abortPutThrows(partKey);
+        } catch ( RuntimeException ex) {
+            throw ex;
+        } catch ( Exception ex ) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    private void abortPutThrows(ObjectPartKey partKey) throws IOException {
+        Path uploadDir = getUploadDir(partKey);
+        deleteDir(uploadDir);
     }
 
     @Override
-    public void completePut(ObjectPartKey partKey, List<ObjectPartId> partKeys) {
+    public void completePut(ObjectPartKey partKey, List<ObjectPartId> partIds) {
+        try {
+            completePutThrows(partKey, partIds);
+        } catch ( RuntimeException ex) {
+            throw ex;
+        } catch ( Exception ex ) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    private void completePutThrows(ObjectPartKey partKey, List<ObjectPartId> partIds) throws IOException {
+        Path uploadDir = getUploadDir(partKey);
+
+        Path bucketRoot = Paths.get(_bucketsRoot.toString(), partKey.getBucket());
+        if(!Files.exists(bucketRoot))
+            throw(new EntityNotFoundException("Bucket "+partKey.getBucket()+" does not exist"));
+        Path objFile = Paths.get(bucketRoot.toString(), toKeyId(partKey.getKey()));
+        Path parentDir = objFile.getParent();
+        if(parentDir != null && Files.exists(parentDir))
+            parentDir.toFile().mkdirs();
+        try ( OutputStream out = Files.newOutputStream(objFile) ) {
+            for ( ObjectPartId partId : partIds ) {
+                Path partPath = Paths.get(
+                    uploadDir.toString(),
+                    String.format("%s.part%04d", partId.getPartId(), partId.getPartNum()));
+                Files.copy(partPath, out);
+            }
+        }
+        // Delete the uploadDir:
+        deleteDir(uploadDir);
+    }
+
+    private void deleteDir(Path directory) throws IOException {
+        Files.walkFileTree(directory, new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException ex) throws IOException {
+                    if ( null != ex ) Files.delete(dir);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+    }
+
+    private Path getUploadDir(ObjectPartKey partKey) throws IOException {
+        // Validation:
+        String uploadId = partKey.getUploadId();
+        if ( null == uploadId || uploadId.startsWith(".") || uploadId.contains("/") ) {
+            throw new IllegalArgumentException("Invalid partKey.uploadId");
+        }
+        Path uploadDir = Paths.get(_partsRoot.toString(), uploadId);
+        Path uploadDirMeta = Paths.get(_partsRoot.toString(), uploadId, ".KEY");
+        if ( ! Files.exists(uploadDirMeta) ) {
+            throw new EntityNotFoundException("NotFound: "+partKey+" partsRoot="+_partsRoot);
+        }
+        String bucketKey = new String(Files.readAllBytes(uploadDirMeta), UTF_8);
+        String expectBucketKey = partKey.getBucket()+"/"+partKey.getKey();
+        if ( ! bucketKey.equals(expectBucketKey) ) {
+            throw new EntityNotFoundException(
+                "NotFound: expected bucketKey="+expectBucketKey+" partKey="+partKey+" partsRoot="+_partsRoot);
+        }
+        return uploadDir;
+    }
+
+    private void validate(ObjectKey objectKey) {
+        if ( ! validFileName(objectKey.getBucket()) ) {
+            throw new IllegalArgumentException("objectKey.bucket is invalid "+objectKey);
+        }
+        if ( ! validCanonicalRelativePath(objectKey.getKey()) ) {
+            throw new IllegalArgumentException("objectKey.key is invalid "+objectKey);
+        }
+    }
+
+    private static boolean validFileName(String name) {
+        if ( null == name || name.isEmpty() ) return false;
+        if ( ".".equals(name) ) return false;
+        if ( "..".equals(name) ) return false;
+        if ( name.contains("/") ) return false;
+        if ( name.contains(File.separator) ) return false;
+        return true;
+    }
+
+    private static boolean validCanonicalRelativePath(String name) {
+        if ( null == name || name.isEmpty() ) return false;
+        for ( String part : name.split("/") ) {
+            if ( ! validFileName(part) ) return false;
+        }
+        return true;
     }
 
     /**
@@ -322,7 +498,9 @@ public class DiskObjectStore extends AbstractObjectStore
         }
         return true;
     }
-
+    
+    // TODO: Use Path.relativize():
+    // https://docs.oracle.com/javase/8/docs/api/java/nio/file/Path.html#relativize-java.nio.file.Path-
     private ObjectKey toObjectkey(File file)
     {
         if(file.isDirectory())

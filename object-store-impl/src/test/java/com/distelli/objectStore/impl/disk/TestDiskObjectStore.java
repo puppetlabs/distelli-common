@@ -21,6 +21,7 @@ import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestName;
+import com.distelli.persistence.PageIterator;
 import com.distelli.objectStore.*;
 import com.distelli.objectStore.impl.*;
 import com.google.inject.Guice;
@@ -125,7 +126,7 @@ public class TestDiskObjectStore
         //now delete it
         assertDelete(bucketDir, key);
         ObjectKey prefixKey = ObjectKey.builder().bucket(bucketName).key("/").build();
-        _diskObjectStore.list(prefixKey, null);
+        _diskObjectStore.list(prefixKey, new PageIterator());
     }
 
     private void assertPut(File bucketDir, ObjectKey key, byte[] contentBytes)
