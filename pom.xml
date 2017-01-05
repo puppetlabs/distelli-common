@@ -23,6 +23,7 @@
     <module>object-store-api</module>
     <module>object-store-impl</module>
     <module>distelli-webserver</module>
+    <module>utils</module>
   </modules>
   <scm>
     <connection>scm:git:git@github.com:Distelli/distelli-common.git</connection>
