@@ -7,7 +7,7 @@
 */
 package com.distelli.webserver;
 
-public interface RequestFilter
+public interface RequestFilter<R extends RequestContext>
 {
-    public WebResponse filter(RequestContext context, RequestFilterChain next);
+    public WebResponse filter(R requestContext, RequestFilterChain next);
 }
