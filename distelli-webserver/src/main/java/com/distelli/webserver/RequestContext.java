@@ -39,9 +39,15 @@ public class RequestContext
     private JsonNode _jsonContent = null;
     private Cookie _sessionCookie = null;
     private Cookie[] _inputCookies = null;
+    private boolean _unmarshallJson;
 
-    public RequestContext(HTTPMethod httpMethod, HttpServletRequest request)
+    public RequestContext(HTTPMethod httpMethod, HttpServletRequest request) {
+        this(httpMethod, request, true);
+    }
+
+    public RequestContext(HTTPMethod httpMethod, HttpServletRequest request, boolean unmarshallJson)
     {
+        _unmarshallJson = unmarshallJson;
         _headers = extractHeaders(request);
         loadQueryParams(request.getParameterMap());
         _httpMethod = httpMethod;
@@ -145,6 +151,7 @@ public class RequestContext
 
     private boolean unmarshallJson(HttpServletRequest request)
     {
+        if(!_unmarshallJson) return false;
         try
         {
             if(_contentType != null && _contentType.equalsIgnoreCase(WebConstants.CONTENT_TYPE_JSON))
