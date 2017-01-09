@@ -131,6 +131,7 @@ public class WebServlet extends HttpServlet
             if(route == null)
                 throw(new IllegalStateException("No Route for Path: "+requestContext.getPath()));
 
+            requestContext.setMatchedRoute(route);
             webResponse = runFilters(route, requestContext);
             if(webResponse != null)
             {
@@ -213,9 +214,6 @@ public class WebServlet extends HttpServlet
 
     private WebResponse handleRequest(MatchedRoute route, RequestContext requestContext)
     {
-        Map<String, String> routeParams = route.getParams();
-        requestContext.addRouteParams(routeParams);
-
         RequestHandler requestHandler = _requestHandlerFactory.getRequestHandler(route);
         if(log.isDebugEnabled())
             log.debug("Calling RequestHandler: "+requestHandler.toString()+" for Request: "+requestContext.getRequestId());

@@ -25,6 +25,7 @@ public class RequestContext
 
     private Map<String, String> _headers = null;
     private Map<String, List<String>> _queryParams = null;
+    private MatchedRoute _matchedRoute;
     private HTTPMethod _httpMethod = null;
     private String _path = null;
     private String _originalPath = null;
@@ -337,24 +338,24 @@ public class RequestContext
         return this._requestId;
     }
 
-    public final void addRouteParams(Map<String, String> routeParams)
-    {
-        if(routeParams == null)
-            return;
-        for(Map.Entry<String, String> routeParam : routeParams.entrySet())
-        {
-            String paramKey = routeParam.getKey();
-            List<String> paramValues = _queryParams.get(paramKey);
-            if(paramValues == null)
-            {
-                paramValues = new ArrayList<String>();
-                _queryParams.put(paramKey, paramValues);
-            }
+    // public final void addRouteParams(Map<String, String> routeParams)
+    // {
+    //     if(routeParams == null)
+    //         return;
+    //     for(Map.Entry<String, String> routeParam : routeParams.entrySet())
+    //     {
+    //         String paramKey = routeParam.getKey();
+    //         List<String> paramValues = _queryParams.get(paramKey);
+    //         if(paramValues == null)
+    //         {
+    //             paramValues = new ArrayList<String>();
+    //             _queryParams.put(paramKey, paramValues);
+    //         }
 
-            String newValue = routeParam.getValue();
-            paramValues.add(newValue);
-        }
-    }
+    //         String newValue = routeParam.getValue();
+    //         paramValues.add(newValue);
+    //     }
+    // }
 
     public boolean isGZipAccepted()
     {
@@ -403,5 +404,15 @@ public class RequestContext
 
     public Cookie[] getCookies() {
         return _inputCookies;
+    }
+
+    public void setMatchedRoute(MatchedRoute matchedRoute)
+    {
+        _matchedRoute = matchedRoute;
+    }
+
+    public MatchedRoute getMatchedRoute()
+    {
+        return _matchedRoute;
     }
 }

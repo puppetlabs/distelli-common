@@ -28,6 +28,13 @@ public class MatchedRoute
         return _routeParams;
     }
 
+    public String getParam(String key)
+    {
+        if(_routeParams == null)
+            return null;
+        return _routeParams.get(key);
+    }
+
     public Class<? extends RequestHandler> getRequestHandler()
     {
         return _routeSpec.getRequestHandler();
