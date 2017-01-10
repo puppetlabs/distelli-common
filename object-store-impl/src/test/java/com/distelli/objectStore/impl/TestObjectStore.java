@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.ArrayList;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.Ignore;
 import org.junit.rules.TestName;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized.Parameters;
@@ -278,7 +279,7 @@ TODO: Use http-client to do a request:
     }
 
     // Do not want to throw...
-    @Test
+    @Test @Ignore
     public void testBadKeyDelete() throws Exception {
         ObjectKey key = ObjectKey.builder()
             .bucket(bucketName)

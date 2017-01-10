@@ -1,4 +1,4 @@
-package com.distelli.objectStore.impl;
+package com.distelli.utils;
 
 import java.io.File;
 import java.io.IOException;

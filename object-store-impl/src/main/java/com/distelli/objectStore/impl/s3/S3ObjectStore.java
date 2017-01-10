@@ -22,13 +22,14 @@ import com.distelli.cred.CredProvider;
 import com.distelli.objectStore.*;
 import com.distelli.objectStore.impl.AbstractObjectStore;
 import com.distelli.objectStore.impl.ObjectStoreBuilder;
-import com.distelli.objectStore.impl.ResettableInputStream;
+import com.distelli.utils.ResettableInputStream;
 import com.distelli.persistence.PageIterator;
 import com.google.inject.assistedinject.Assisted;
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.FileInputStream;
 import java.net.URI;
 import java.net.URL;
 import java.security.AccessControlException;
@@ -105,6 +106,13 @@ public class S3ObjectStore extends AbstractObjectStore {
         }
     }
 
+    private InputStream makeResettable(InputStream in) throws IOException {
+        if ( !(in instanceof ResettableInputStream) && !(in instanceof FileInputStream) ) {
+            return new ResettableInputStream(in);
+        }
+        return in;
+    }
+
     @Override
     public void put(ObjectKey objectKey, long contentLength, InputStream in) {
         com.amazonaws.services.s3.model.ObjectMetadata meta = new com.amazonaws.services.s3.model.ObjectMetadata();
@@ -113,7 +121,7 @@ public class S3ObjectStore extends AbstractObjectStore {
             meta.setSSEAlgorithm(com.amazonaws.services.s3.model.ObjectMetadata.AES_256_SERVER_SIDE_ENCRYPTION);
         }
         try {
-            amazonS3.putObject(objectKey.getBucket(), objectKey.getKey(), new ResettableInputStream(in), meta);
+            amazonS3.putObject(objectKey.getBucket(), objectKey.getKey(), makeResettable(in), meta);
         } catch ( AmazonS3Exception ex ) {
             handleAmazonS3Exception(ex, objectKey);
         } catch ( IOException ex ) {
@@ -276,11 +284,13 @@ public class S3ObjectStore extends AbstractObjectStore {
                 amazonS3.uploadPart(
                     new UploadPartRequest()
                     .withBucketName(partKey.getBucket())
-                    .withInputStream(in)
+                    .withInputStream(makeResettable(in))
                     .withKey(partKey.getKey())
                     .withPartNumber(partNum)
                     .withPartSize(contentLength)
                     .withUploadId(partKey.getUploadId()));
+        } catch ( IOException ex ) {
+            throw new RuntimeException(ex);
         } catch ( AmazonS3Exception ex ) {
             handleAmazonS3Exception(ex, partKey);
         }
@@ -326,7 +336,7 @@ public class S3ObjectStore extends AbstractObjectStore {
         case 404: throw new EntityNotFoundException("NotFound: "+objectKey+" endpoint="+endpoint);
         case 401:
         case 403:
-            throw new AccessControlException("Access denied to "+objectKey+" endpoint="+endpoint);
+            throw new AccessControlException("AccessDenied: "+objectKey+" endpoint="+endpoint+" "+ex.getMessage());
         }
         throw ex;
     }
@@ -341,7 +351,7 @@ public class S3ObjectStore extends AbstractObjectStore {
         case 404: throw new EntityNotFoundException("NotFound: "+objectPartKey+" endpoint="+endpoint);
         case 401:
         case 403:
-            throw new AccessControlException("AccessDenied: "+objectPartKey+" endpoint="+endpoint);
+            throw new AccessControlException("AccessDenied: "+objectPartKey+" endpoint="+endpoint+" "+ex.getMessage());
         }
         throw ex;
     }
