@@ -23,24 +23,24 @@ public class RequestContext
 
     private static final ObjectMapper _objectMapper = new ObjectMapper();
 
-    private Map<String, String> _headers = null;
-    private Map<String, List<String>> _queryParams = null;
-    private MatchedRoute _matchedRoute;
-    private HTTPMethod _httpMethod = null;
-    private String _path = null;
-    private String _originalPath = null;
-    private String _queryString = null;
-    private String _contentType = null;
-    private String _remoteAddress = null;
-    private String _remoteUser = null;
-    private String _requestId = null;
-    private int _contentLength = 0;
-    private HttpSession _httpSession = null;
-    private InputStream _requestStream = null;
-    private JsonNode _jsonContent = null;
-    private Cookie _sessionCookie = null;
-    private Cookie[] _inputCookies = null;
-    private boolean _unmarshallJson;
+    protected Map<String, String> _headers = null;
+    protected Map<String, List<String>> _queryParams = null;
+    protected MatchedRoute _matchedRoute;
+    protected HTTPMethod _httpMethod = null;
+    protected String _path = null;
+    protected String _originalPath = null;
+    protected String _queryString = null;
+    protected String _contentType = null;
+    protected String _remoteAddress = null;
+    protected String _remoteUser = null;
+    protected String _requestId = null;
+    protected int _contentLength = 0;
+    protected HttpSession _httpSession = null;
+    protected InputStream _requestStream = null;
+    protected JsonNode _jsonContent = null;
+    protected Cookie _sessionCookie = null;
+    protected Cookie[] _inputCookies = null;
+    protected boolean _unmarshallJson;
 
     public RequestContext(HTTPMethod httpMethod, HttpServletRequest request) {
         this(httpMethod, request, true);
@@ -337,25 +337,6 @@ public class RequestContext
     public final String getRequestId() {
         return this._requestId;
     }
-
-    // public final void addRouteParams(Map<String, String> routeParams)
-    // {
-    //     if(routeParams == null)
-    //         return;
-    //     for(Map.Entry<String, String> routeParam : routeParams.entrySet())
-    //     {
-    //         String paramKey = routeParam.getKey();
-    //         List<String> paramValues = _queryParams.get(paramKey);
-    //         if(paramValues == null)
-    //         {
-    //             paramValues = new ArrayList<String>();
-    //             _queryParams.put(paramKey, paramValues);
-    //         }
-
-    //         String newValue = routeParam.getValue();
-    //         paramValues.add(newValue);
-    //     }
-    // }
 
     public boolean isGZipAccepted()
     {

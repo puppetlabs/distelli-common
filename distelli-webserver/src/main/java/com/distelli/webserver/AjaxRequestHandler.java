@@ -33,18 +33,23 @@ public class AjaxRequestHandler extends RequestHandler
         try {
             String contentType = requestContext.getContentType();
             HTTPMethod httpMethod = requestContext.getHttpMethod();
+            AjaxRequest ajaxRequest = null;
             //POST requests should be content type application/json
-            if(httpMethod != null && httpMethod == HTTPMethod.POST)
+            if(httpMethod == null)
+                return jsonError(JsonError.UnsupportedHttpMethod);
+            if(httpMethod == HTTPMethod.POST)
             {
                 if(contentType == null || !contentType.equalsIgnoreCase(WebConstants.CONTENT_TYPE_JSON))
                     return jsonError(JsonError.BadContentType);
-            }
-            AjaxRequest ajaxRequest = null;
-            JsonNode jsonContent = requestContext.getJsonContent();
-            if(jsonContent != null)
+                JsonNode jsonContent = requestContext.getJsonContent();
+                if(jsonContent == null)
+                    throw(new IllegalStateException("JSON Content is null for POST request"));
                 ajaxRequest = AjaxRequest.fromJson(jsonContent);
-            else
+            } else if(httpMethod == HTTPMethod.GET) {
                 ajaxRequest = AjaxRequest.fromQueryParams(requestContext.getQueryParams());
+            } else {
+                return jsonError(JsonError.UnsupportedHttpMethod);
+            }
 
             String operation = ajaxRequest.getOperation();
             if(operation == null)
@@ -54,7 +59,7 @@ public class AjaxRequestHandler extends RequestHandler
                 return jsonError(JsonError.UnsupportedOperation);
             if(!ajaxHelper.isMethodSupported(httpMethod))
                 return jsonError(JsonError.UnsupportedHttpMethod);
-            Object response = ajaxHelper.get(ajaxRequest);
+            Object response = ajaxHelper.get(ajaxRequest, requestContext);
             if(response != null)
                 return toJson(response);
             //return a 404 with a not found json object if the object
