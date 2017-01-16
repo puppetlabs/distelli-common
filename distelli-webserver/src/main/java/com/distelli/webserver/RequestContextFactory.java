@@ -9,14 +9,8 @@
 package com.distelli.webserver;
 import javax.servlet.http.HttpServletRequest;
 
-public class RequestContextFactory
+@FunctionalInterface
+public interface RequestContextFactory<R extends RequestContext>
 {
-    public RequestContextFactory()
-    {
-
-    }
-
-    public RequestContext getRequestContext(HTTPMethod httpMethod, HttpServletRequest request) {
-        return new RequestContext(httpMethod, request);
-    }
+    public R getRequestContext(HTTPMethod httpMethod, HttpServletRequest request);
 }

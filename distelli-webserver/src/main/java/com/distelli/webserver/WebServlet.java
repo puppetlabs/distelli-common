@@ -1,5 +1,7 @@
 package com.distelli.webserver;
 
+import java.util.Collections;
+import java.util.Arrays;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -16,16 +18,17 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.Collection;
 
-public class WebServlet extends HttpServlet
+public class WebServlet<RCTX extends RequestContext> extends HttpServlet
 {
     private static final Logger log = LoggerFactory.getLogger(WebServlet.class);
 
     private RouteMatcher _routeMatcher = null;
     private RequestHandlerFactory _requestHandlerFactory = null;
-    private RequestContextFactory _requestContextFactory = new RequestContextFactory();
+    private RequestContextFactory<RCTX> _requestContextFactory = null;
 
-    private RequestFilter[] _requestFilters = null;
+    private List<RequestFilter<RCTX>> _requestFilters = Collections.emptyList();
     public WebServlet(RouteMatcher routeMatcher, RequestHandlerFactory requestHandlerFactory)
     {
         _routeMatcher = routeMatcher;
@@ -98,9 +101,14 @@ public class WebServlet extends HttpServlet
             super.service(request, response);
     }
 
-    public void setRequestFilters(RequestFilter... requestFilters)
+    public void setRequestFilters(RequestFilter<RCTX>... requestFilters)
     {
-        _requestFilters = requestFilters;
+        _requestFilters = Arrays.asList(requestFilters);
+    }
+
+    public void setRequestFilters(Collection<RequestFilter<RCTX>> requestFilters)
+    {
+        _requestFilters = new ArrayList<RequestFilter<RCTX>>(requestFilters);
     }
 
     public void setRequestHandlerFactory(RequestHandlerFactory requestHandlerFactory)
@@ -110,7 +118,7 @@ public class WebServlet extends HttpServlet
         _requestHandlerFactory = requestHandlerFactory;
     }
 
-    public void setRequestContextFactory(RequestContextFactory requestContextFactory)
+    public void setRequestContextFactory(RequestContextFactory<RCTX> requestContextFactory)
     {
         if(requestContextFactory == null)
             throw(new IllegalArgumentException("Request Context Factory cannot be null"));
@@ -120,9 +128,13 @@ public class WebServlet extends HttpServlet
     public void handleRequest(HTTPMethod httpMethod, HttpServletRequest request, HttpServletResponse response)
         throws ServletException
     {
+        if ( null == _requestContextFactory ) {
+            throw new IllegalStateException("WebServlet must be initialized with a RequestContextFactory.");
+        }
+
         OutputStream out = null;
         WebResponse webResponse = null;
-        RequestContext requestContext = null;
+        RCTX requestContext = null;
         boolean writeGZipped = false;
         try
         {
@@ -201,18 +213,16 @@ public class WebServlet extends HttpServlet
         }
     }
 
-    private WebResponse runFilters(MatchedRoute route, RequestContext requestContext)
+    private WebResponse runFilters(MatchedRoute route, RCTX requestContext)
     {
-        RequestFilterChain requestFilterChain = new RequestFilterSink(route, this);
-        if(_requestFilters != null) {
-            for(int i = _requestFilters.length - 1; i>=0; i--) {
-                requestFilterChain = new RequestFilterHolder(_requestFilters[i], requestFilterChain);
-            }
+        RequestFilterChain<RCTX> requestFilterChain = new RequestFilterSink<RCTX>(route, this);
+        for(int i = _requestFilters.size() - 1; i>=0; i--) {
+            requestFilterChain = new RequestFilterHolder<RCTX>(_requestFilters.get(i), requestFilterChain);
         }
         return requestFilterChain.filter(requestContext);
     }
 
-    private WebResponse handleRequest(MatchedRoute route, RequestContext requestContext)
+    private WebResponse handleRequest(MatchedRoute route, RCTX requestContext)
     {
         RequestHandler requestHandler = _requestHandlerFactory.getRequestHandler(route);
         if(log.isDebugEnabled())
@@ -223,19 +233,19 @@ public class WebServlet extends HttpServlet
         return webResponse;
     }
 
-    private static class RequestFilterHolder implements RequestFilterChain {
-        private RequestFilter _filter;
-        private RequestFilterChain _chain;
-        public RequestFilterHolder(RequestFilter filter, RequestFilterChain chain) {
+    private static class RequestFilterHolder<RCTX extends RequestContext> implements RequestFilterChain<RCTX> {
+        private RequestFilter<RCTX> _filter;
+        private RequestFilterChain<RCTX> _chain;
+        public RequestFilterHolder(RequestFilter<RCTX> filter, RequestFilterChain<RCTX> chain) {
             _filter = filter;
             _chain = chain;
         }
-        public WebResponse filter(RequestContext requestContext) {
+        public WebResponse filter(RCTX requestContext) {
             return _filter.filter(requestContext, _chain);
         }
     }
 
-    private static class RequestFilterSink implements RequestFilterChain {
+    private static class RequestFilterSink<RCTX extends RequestContext> implements RequestFilterChain<RCTX> {
         private MatchedRoute _route;
         private WebServlet _servlet;
         public RequestFilterSink(MatchedRoute route, WebServlet servlet) {
@@ -243,7 +253,7 @@ public class WebServlet extends HttpServlet
             _servlet = servlet;
         }
 
-        public WebResponse filter(RequestContext requestContext) {
+        public WebResponse filter(RCTX requestContext) {
             return _servlet.handleRequest(_route, requestContext);
         }
     }
