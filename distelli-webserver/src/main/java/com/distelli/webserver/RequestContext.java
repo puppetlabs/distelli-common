@@ -41,6 +41,7 @@ public class RequestContext
     protected Cookie _sessionCookie = null;
     protected Cookie[] _inputCookies = null;
     protected boolean _unmarshallJson;
+    protected WebSession _webSession = null;
 
     public RequestContext(HTTPMethod httpMethod, HttpServletRequest request) {
         this(httpMethod, request, true);
@@ -395,5 +396,13 @@ public class RequestContext
     public MatchedRoute getMatchedRoute()
     {
         return _matchedRoute;
+    }
+
+    public WebSession getWebSession() {
+        return _webSession;
+    }
+
+    public void setWebSession(WebSession webSession) {
+        _webSession = webSession;
     }
 }
