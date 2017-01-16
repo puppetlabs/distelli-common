@@ -9,7 +9,7 @@ install: has-distelli-config
 	. ~/.distelli.config && mvn -q install
 
 test: has-distelli-config
-	. ~/.distelli.config && mvn -q -Dsurefire.useFile=false -DfailIfNoTests=false -Dtest=TestWebSession $(MVN_OPTS) test
+	. ~/.distelli.config && mvn -q -Dsurefire.useFile=false -DfailIfNoTests=false $(MVN_OPTS) test
 
 clean:
 	mvn -q clean
