@@ -7,6 +7,7 @@
 */
 package com.distelli.webserver;
 
+import java.util.Map;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpSession;
 import java.security.Key;
@@ -26,20 +27,22 @@ public abstract class WebSessionFactory<R extends RequestContext>
 
     public WebSession createSession()
     {
-        return createSession(false);
+        return createSession(false, null);
     }
 
-    public WebSession createSession(boolean loggedIn)
+    public WebSession createSession(boolean loggedIn, Map<String, String> vars)
     {
-        WebSession webSession = new WebSession.Builder()
+        WebSession.Builder webSessionBuilder = new WebSession.Builder()
         .withIsSecure(false)
         .withIsHttpOnly(true)
         .withMaxInactiveTimeMillis(_maxInactiveTimeMillis)
         .withCookieName(getCookieName())
         .withLastActiveTimeMillis(System.currentTimeMillis())
         .withSessionKey(_sessionKey)
-        .withLoggedIn(loggedIn)
-        .build();
+        .withLoggedIn(loggedIn);
+        if(vars != null)
+            webSessionBuilder.withVars(vars);
+        WebSession webSession = webSessionBuilder.build();
         return webSession;
     }
 
@@ -58,9 +61,9 @@ public abstract class WebSessionFactory<R extends RequestContext>
         return;
     }
 
-    public void login(R requestContext)
+    public void login(R requestContext, Map<String, String> vars)
     {
-        WebSession webSession = createSession(true);
+        WebSession webSession = createSession(true, vars);
         requestContext.setWebSession(webSession);
         return;
     }
