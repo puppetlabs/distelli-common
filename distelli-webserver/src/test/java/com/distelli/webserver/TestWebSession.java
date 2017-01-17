@@ -91,15 +91,4 @@ public class TestWebSession
 
         assertThat(webSession2.isExpired(), equalTo(false));
     }
-
-    @Test
-    public void testEmptySession()
-    {
-        WebSession webSession = WebSession.emptySession(COOKIE_NAME);
-        assertThat(webSession, is(not(nullValue())));
-        assertThat(webSession.isExpired(), equalTo(true));
-        assertThat(webSession.getVars(), equalTo(null));
-        assertThat(webSession.getVar("A"), equalTo(null));
-        Cookie cookie = webSession.toCookie();
-    }
 }

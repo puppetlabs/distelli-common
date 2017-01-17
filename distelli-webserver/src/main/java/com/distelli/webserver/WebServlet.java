@@ -192,6 +192,7 @@ public class WebServlet<RCTX extends RequestContext> extends HttpServlet
         }
         catch(Throwable t)
         {
+            log.error(t.getMessage(), t);
             throw(new ServletException(t));
         }
 

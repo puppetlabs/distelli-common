@@ -106,6 +106,7 @@ public class WebSession
             webSession.isHttpOnly = session.isHttpOnly;
             webSession.isSecure = session.isSecure;
             webSession.vars = _vars;
+            webSession.setLoggedIn(_isLoggedIn);
             webSession.setLastActiveTime(session.lastActiveTimeMillis);
             return webSession;
         }
@@ -150,13 +151,6 @@ public class WebSession
     public WebSession()
     {
 
-    }
-
-    public static WebSession emptySession(String cookieName)
-    {
-        WebSession webSession = new WebSession();
-        webSession.cookieName = cookieName;
-        return webSession;
     }
 
     public Map<String, String> getVars()
@@ -252,7 +246,7 @@ public class WebSession
 
     public boolean isExpired()
     {
-        if(this.vars == null || !isLoggedIn())
+        if(this.vars == null)
             return true;
 
         long now = System.currentTimeMillis();
