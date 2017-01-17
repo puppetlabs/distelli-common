@@ -9,6 +9,7 @@
 package com.distelli.webserver;
 
 import java.util.Arrays;
+import java.util.HashMap;
 
 import java.util.Map;
 import org.junit.Test;
@@ -90,5 +91,23 @@ public class TestWebSession
         assertThat(webSession.getVars(), equalTo(webSession2.getVars()));
 
         assertThat(webSession2.isExpired(), equalTo(false));
+    }
+
+    @Test
+    public void testLogin()
+    {
+        Map<String, String> vars = new HashMap<String, String>();
+        vars.put("A", "B");
+        WebSession.Builder webSessionBuilder = new WebSession.Builder()
+        .withIsSecure(false)
+        .withIsHttpOnly(true)
+        .withMaxInactiveTimeMillis(MAX_INACTIVE_TIME_MILLIS)
+        .withCookieName(COOKIE_NAME)
+        .withLastActiveTimeMillis(System.currentTimeMillis())
+        .withSessionKey(sessionKey)
+        .withLoggedIn(true);
+        if(vars != null)
+            webSessionBuilder.withVars(vars);
+        WebSession webSession = webSessionBuilder.build();
     }
 }

@@ -82,7 +82,10 @@ public class WebSession
         public Builder withIsSecure(boolean isSecure) {this._isSecure = isSecure; return this;}
         public Builder withIsHttpOnly(boolean isHttpOnly) {this._isHttpOnly = isHttpOnly; return this;}
         public Builder withVar(String key, String value) {this._vars.put(key, value); return this;}
-        public Builder withVars(Map<String, String> vars) {this._vars = vars; return this;}
+        public Builder withVars(Map<String, String> vars) {
+            this._vars.putAll(vars);
+            return this;
+        }
         public Builder withLastActiveTimeMillis(long lastActiveTimeMillis) {
             this._lastActiveTimeMillis = lastActiveTimeMillis; return this;
         }
