@@ -53,7 +53,6 @@ public class WebSession
     public static final String LAST_ACTIVE_TIME = "lat";
 
     protected int sessionVersion = 1;
-    protected String sessionId;
     protected boolean isSecure = false;
     protected boolean isHttpOnly = true;
     protected Key sessionKey;
@@ -63,7 +62,6 @@ public class WebSession
     protected String cookieName;
 
     public static class Builder {
-        private String _sessionId;
         private int _sessionVersion = 1;
         private Key _sessionKey;
         private boolean _isSecure = false;
@@ -74,15 +72,17 @@ public class WebSession
         private String _cookieName;
         private boolean _isLoggedIn;
 
+        private WebSession _session = null;
+        private Cookie _cookie = null;
         public Builder()
         {
             this._vars = new HashMap<String, String>();
         }
-        public Builder withSessionId(String sessionId) {this._sessionId = sessionId; return this;}
         public Builder withIsSecure(boolean isSecure) {this._isSecure = isSecure; return this;}
         public Builder withIsHttpOnly(boolean isHttpOnly) {this._isHttpOnly = isHttpOnly; return this;}
         public Builder withVar(String key, String value) {this._vars.put(key, value); return this;}
         public Builder withVars(Map<String, String> vars) {
+            checkForReservedVars(vars);
             this._vars.putAll(vars);
             return this;
         }
@@ -96,38 +96,79 @@ public class WebSession
         public Builder withSessionKey(Key sessionKey) {this._sessionKey = sessionKey; return this;}
         public Builder withSessionVersion(int sessionVersion) {this._sessionVersion = sessionVersion; return this;}
         public Builder withLoggedIn(boolean isLoggedIn) {this._isLoggedIn = isLoggedIn; return this;}
+        public Builder withSession(WebSession webSession) {this._session = webSession; return this;}
+        public Builder withCookie(Cookie cookie) {this._cookie = cookie; return this;}
 
-        public WebSession buildFromSession(WebSession session)
+        private void checkForReservedVars(Map<String, String> vars) {
+            if(vars == null)
+                return;
+            if(vars.containsKey(LOGGED_IN_KEY))
+                throw(new IllegalArgumentException("Cannot set reserved Session Var: "+LOGGED_IN_KEY));
+            if(vars.containsKey(LAST_ACTIVE_TIME))
+                throw(new IllegalArgumentException("Cannot set reserved Session Var: "+LAST_ACTIVE_TIME));
+        }
+
+        public WebSession buildFromSession()
+        {
+            return buildFromSession(null);
+        }
+
+        public WebSession buildFromSession(Map<String, String> vars)
+        {
+            return buildFromSession(null, vars);
+        }
+
+        public WebSession buildFromSession(boolean isLoggedIn)
+        {
+            return buildFromSession(isLoggedIn, null);
+        }
+
+        //This build method ignores all the properties in the builder
+        //and instead uses the _session. It creates a new session
+        //thats exactly the same as the _session then it updates the
+        //vars with the ones passed in. If the Boolean isLogged in is
+        //non-null then the new session is updated with that
+        public WebSession buildFromSession(Boolean isLoggedIn, Map<String, String> vars)
         {
             WebSession webSession = new WebSession();
-            webSession.sessionId = session.sessionId;
-            webSession.lastActiveTimeMillis = session.lastActiveTimeMillis;
-            webSession.maxInactiveTimeMillis = session.maxInactiveTimeMillis;
-            webSession.cookieName = session.cookieName;
-            webSession.sessionVersion = session.sessionVersion;
-            webSession.sessionKey = session.sessionKey;
-            webSession.isHttpOnly = session.isHttpOnly;
-            webSession.isSecure = session.isSecure;
-            webSession.vars = _vars;
-            webSession.setLoggedIn(_isLoggedIn);
-            webSession.setLastActiveTime(session.lastActiveTimeMillis);
+            webSession.lastActiveTimeMillis = _session.lastActiveTimeMillis;
+            webSession.maxInactiveTimeMillis = _session.maxInactiveTimeMillis;
+            webSession.cookieName = _session.cookieName;
+            webSession.sessionVersion = _session.sessionVersion;
+            webSession.sessionKey = _session.sessionKey;
+            webSession.isHttpOnly = _session.isHttpOnly;
+            webSession.isSecure = _session.isSecure;
+            webSession.vars = _session.getVars();
+            webSession.setLoggedIn(_session.isLoggedIn());
+            webSession.setLastActiveTime(_session.lastActiveTimeMillis);
+            if(vars != null)
+            {
+                checkForReservedVars(vars);
+                if(webSession.vars == null)
+                    webSession.vars = new HashMap<String, String>();
+                webSession.vars.putAll(vars);
+            }
+            if(isLoggedIn != null)
+                webSession.setLoggedIn(isLoggedIn.booleanValue());
             return webSession;
         }
 
-        public WebSession buildFromCookie(Cookie cookie)
+        //This method gets the vars from the cookie.
+        public WebSession buildFromCookie()
         {
             WebSession webSession = new WebSession();
-            webSession.sessionId = _sessionId;
             webSession.maxInactiveTimeMillis = _maxInactiveTimeMillis;
             webSession.cookieName = _cookieName;
             webSession.sessionVersion = _sessionVersion;
             webSession.sessionKey = _sessionKey;
             webSession.isHttpOnly = _isHttpOnly;
             webSession.isSecure = _isSecure;
-            try {
-                webSession.vars = webSession.deserialize(cookie.getValue());
-            } catch(Throwable t) {
-                throw(new RuntimeException(t));
+            if(_cookie != null) {
+                try {
+                    webSession.vars = webSession.deserialize(_cookie.getValue());
+                } catch(Throwable t) {
+                    throw(new RuntimeException(t));
+                }
             }
             webSession.lastActiveTimeMillis = webSession.getLastActiveTimeLong();
             return webSession;
@@ -136,7 +177,6 @@ public class WebSession
         public WebSession build()
         {
             WebSession webSession = new WebSession();
-            webSession.sessionId = _sessionId;
             webSession.vars = _vars;
             webSession.lastActiveTimeMillis = _lastActiveTimeMillis;
             webSession.maxInactiveTimeMillis = _maxInactiveTimeMillis;
@@ -166,11 +206,6 @@ public class WebSession
         if(this.vars == null)
             return null;
         return this.vars.get(key);
-    }
-
-    public String getSessionId()
-    {
-        return this.sessionId;
     }
 
     public boolean isLoggedIn()

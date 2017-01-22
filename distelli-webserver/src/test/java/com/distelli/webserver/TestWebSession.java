@@ -41,7 +41,6 @@ public class TestWebSession
     {
         String sessionId = "1234567890";
         WebSession webSession = new WebSession.Builder()
-        .withSessionId(sessionId)
         .withIsSecure(true)
         .withIsHttpOnly(true)
         .withLoggedIn(true)
@@ -65,13 +64,13 @@ public class TestWebSession
         Cookie cookie = webSession.toCookie();
 
         WebSession webSession2 = new WebSession.Builder()
-        .withSessionId(sessionId)
         .withIsSecure(true)
         .withIsHttpOnly(true)
         .withMaxInactiveTimeMillis(MAX_INACTIVE_TIME_MILLIS)
         .withCookieName(COOKIE_NAME)
         .withSessionKey(sessionKey)
-        .buildFromCookie(cookie);
+        .withCookie(cookie)
+        .buildFromCookie();
 
         assertThat(webSession2, is(not(nullValue())));
         assertThat(webSession2.getVar("A"), is(not(nullValue())));
@@ -81,7 +80,6 @@ public class TestWebSession
         assertThat(webSession2.isLoggedIn(), equalTo(true));
 
         assertThat(webSession.getSessionVersion(), equalTo(webSession2.getSessionVersion()));
-        assertThat(webSession.getSessionId(), equalTo(webSession2.getSessionId()));
         assertThat(webSession.isSecure(), equalTo(webSession2.isSecure()));
         assertThat(webSession.isHttpOnly(), equalTo(webSession2.isHttpOnly()));
         assertThat(webSession.getSessionKey(), equalTo(webSession2.getSessionKey()));

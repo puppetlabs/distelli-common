@@ -8,6 +8,7 @@
 package com.distelli.webserver;
 
 import java.util.Map;
+import java.util.HashMap;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpSession;
 import java.security.Key;
@@ -17,6 +18,8 @@ public abstract class WebSessionFactory<R extends RequestContext>
 {
     protected Key _sessionKey = null;
     protected long _maxInactiveTimeMillis = 24*60*60*1000;
+    protected boolean _httpOnly = true;
+    protected boolean _isSecure = false;
 
     public WebSessionFactory()
     {
@@ -30,11 +33,16 @@ public abstract class WebSessionFactory<R extends RequestContext>
         return createSession(false, null);
     }
 
+    public WebSession createSession(boolean loggedIn)
+    {
+        return createSession(loggedIn, null);
+    }
+
     public WebSession createSession(boolean loggedIn, Map<String, String> vars)
     {
         WebSession.Builder webSessionBuilder = new WebSession.Builder()
-        .withIsSecure(false)
-        .withIsHttpOnly(true)
+        .withIsSecure(_isSecure)
+        .withIsHttpOnly(_httpOnly)
         .withMaxInactiveTimeMillis(_maxInactiveTimeMillis)
         .withCookieName(getCookieName())
         .withLastActiveTimeMillis(System.currentTimeMillis())
@@ -49,23 +57,50 @@ public abstract class WebSessionFactory<R extends RequestContext>
     public void logout(R requestContext)
     {
         WebSession webSession = requestContext.getWebSession();
-        if(webSession == null) {
-            webSession = createSession();
-            requestContext.setWebSession(webSession);
-            return;
+        if(webSession == null)
+            webSession = createSession(false);
+        else {
+            webSession = new WebSession.Builder()
+            .withSession(webSession)
+            .buildFromSession(false);
         }
-        webSession = new WebSession.Builder()
-        .withLoggedIn(false)
-        .buildFromSession(webSession);
+
         requestContext.setWebSession(webSession);
-        return;
+    }
+
+    public void updateSession(R requestContext, String var, String value)
+    {
+        Map<String, String> vars = new HashMap<String, String>();
+        vars.put(var, value);
+        updateSession(requestContext, vars);
+    }
+
+    public void updateSession(R requestContext, Map<String, String> vars)
+    {
+        WebSession webSession = requestContext.getWebSession();
+        if(webSession == null) {
+            webSession = createSession(false, vars);
+            requestContext.setWebSession(webSession);
+        } else {
+            webSession = new WebSession.Builder()
+            .withSession(webSession)
+            .buildFromSession(vars);
+        }
+        requestContext.setWebSession(webSession);
     }
 
     public void login(R requestContext, Map<String, String> vars)
     {
-        WebSession webSession = createSession(true, vars);
+        WebSession webSession = requestContext.getWebSession();
+        if(webSession == null) {
+            webSession = createSession(true, vars);
+        } else {
+            webSession = new WebSession.Builder()
+            .withSession(webSession)
+            .buildFromSession(true, vars);
+        }
+
         requestContext.setWebSession(webSession);
-        return;
     }
 
     public boolean isLoggedIn(R requestContext)
@@ -126,14 +161,14 @@ public abstract class WebSessionFactory<R extends RequestContext>
         if(sessionCookie == null)
             return null;
         WebSession webSession = new WebSession.Builder()
-        .withSessionId(sessionId)
-        .withIsSecure(true)
-        .withIsHttpOnly(true)
+        .withCookie(sessionCookie)
+        .withIsSecure(_isSecure)
+        .withIsHttpOnly(_httpOnly)
         .withMaxInactiveTimeMillis(_maxInactiveTimeMillis)
         .withCookieName(getCookieName())
         .withSessionKey(_sessionKey)
         .withLastActiveTimeMillis(System.currentTimeMillis())
-        .buildFromCookie(sessionCookie);
+        .buildFromCookie();
 
         return webSession;
     }
