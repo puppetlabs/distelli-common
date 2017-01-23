@@ -57,7 +57,6 @@ public class WebSession
     protected boolean isHttpOnly = true;
     protected Key sessionKey;
     protected Map<String, String> vars;
-    protected long lastActiveTimeMillis;
     protected long maxInactiveTimeMillis;
     protected String cookieName;
 
@@ -131,7 +130,6 @@ public class WebSession
         public WebSession buildFromSession(Boolean isLoggedIn, Map<String, String> vars)
         {
             WebSession webSession = new WebSession();
-            webSession.lastActiveTimeMillis = _session.lastActiveTimeMillis;
             webSession.maxInactiveTimeMillis = _session.maxInactiveTimeMillis;
             webSession.cookieName = _session.cookieName;
             webSession.sessionVersion = _session.sessionVersion;
@@ -140,7 +138,7 @@ public class WebSession
             webSession.isSecure = _session.isSecure;
             webSession.vars = _session.getVars();
             webSession.setLoggedIn(_session.isLoggedIn());
-            webSession.setLastActiveTime(_session.lastActiveTimeMillis);
+            webSession.setLastActiveTime(_session.getLastActiveTimeMillis());
             if(vars != null)
             {
                 checkForReservedVars(vars);
@@ -150,6 +148,8 @@ public class WebSession
             }
             if(isLoggedIn != null)
                 webSession.setLoggedIn(isLoggedIn.booleanValue());
+            if(_lastActiveTimeMillis != 0)
+                webSession.setLastActiveTime(_lastActiveTimeMillis);
             return webSession;
         }
 
@@ -170,7 +170,7 @@ public class WebSession
                     throw(new RuntimeException(t));
                 }
             }
-            webSession.lastActiveTimeMillis = webSession.getLastActiveTimeLong();
+            webSession.setLastActiveTime(_lastActiveTimeMillis);
             return webSession;
         }
 
@@ -178,7 +178,6 @@ public class WebSession
         {
             WebSession webSession = new WebSession();
             webSession.vars = _vars;
-            webSession.lastActiveTimeMillis = _lastActiveTimeMillis;
             webSession.maxInactiveTimeMillis = _maxInactiveTimeMillis;
             webSession.cookieName = _cookieName;
             webSession.sessionVersion = _sessionVersion;
@@ -240,7 +239,7 @@ public class WebSession
 
     public long getLastActiveTimeMillis()
     {
-        return this.lastActiveTimeMillis;
+        return getLastActiveTimeLong();
     }
 
     public long getMaxInactiveTimeMillis()
@@ -288,11 +287,12 @@ public class WebSession
             return true;
 
         long now = System.currentTimeMillis();
-        if(now < this.lastActiveTimeMillis - MAX_CLOCK_SKEW_MILLIS ) {
+        long lastActiveTimeMillis = getLastActiveTimeMillis();
+        if(now < lastActiveTimeMillis - MAX_CLOCK_SKEW_MILLIS ) {
             log.error("lastActiveTime is a time in the future, check clock skew.");
             return true;
         }
-        if(now > this.lastActiveTimeMillis+this.maxInactiveTimeMillis) {
+        if(now > lastActiveTimeMillis+this.maxInactiveTimeMillis) {
             if(log.isDebugEnabled())
                 log.debug("session expired");
             return true;

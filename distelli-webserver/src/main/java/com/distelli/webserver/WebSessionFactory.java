@@ -97,6 +97,7 @@ public abstract class WebSessionFactory<R extends RequestContext>
         } else {
             webSession = new WebSession.Builder()
             .withSession(webSession)
+            .withLastActiveTimeMillis(System.currentTimeMillis())
             .buildFromSession(true, vars);
         }
 

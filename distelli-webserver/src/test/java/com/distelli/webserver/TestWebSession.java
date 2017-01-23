@@ -70,6 +70,7 @@ public class TestWebSession
         .withCookieName(COOKIE_NAME)
         .withSessionKey(sessionKey)
         .withCookie(cookie)
+        .withLastActiveTimeMillis(webSession.getLastActiveTimeMillis())
         .buildFromCookie();
 
         assertThat(webSession2, is(not(nullValue())));
