@@ -13,23 +13,39 @@ import org.eclipse.jetty.servlet.ServletHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.eclipse.jetty.server.handler.ErrorHandler;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
+import org.eclipse.jetty.server.ServerConnector;
 
 public class WebServer implements Runnable
 {
     private static final Logger log = LoggerFactory.getLogger(WebServer.class);
-    private int _port = 5050;
+    private int _port;
     private WebServlet _appServlet = null;
     private Map<String, WebServlet> _webServlets = null;
     private Map<String, ServletHolder> _standardServlets = null;
     private String _path = null;
     private int _sessionMaxAge = 2592000; //default is 30 days
     private ErrorHandler _errorHandler = null;
+    private Integer _sslPort;
+    private SslContextFactory _sslContextFactory;
 
     public WebServer(int port, WebServlet appServlet, String path)
+    {
+        this(port, appServlet, path, null, null);
+    }
+
+    public WebServer(int port, WebServlet appServlet, String path, Integer sslPort, SslContextFactory sslContextFactory)
     {
         _port = port;
         _appServlet = appServlet;
         _path = path;
+        if ( null == sslPort ^ null == sslContextFactory ) {
+            throw new IllegalArgumentException(
+                "If sslPort is not null, then sslContextFactory must also be non null. Got sslPort="+
+                sslPort+" sslContextFactory="+sslContextFactory);
+        }
+        _sslPort = sslPort;
+        _sslContextFactory = sslContextFactory;
     }
 
     public void setSessionMaxAge(int sessionMaxAge)
@@ -62,6 +78,12 @@ public class WebServer implements Runnable
         try
         {
             Server server = new Server(_port);
+
+            if ( null != _sslPort ) {
+                ServerConnector connector = new ServerConnector(server, _sslContextFactory);
+                connector.setPort(_sslPort);
+                server.addConnector(connector);
+            }
 
             ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
             SessionManager sessionManager = new HashSessionManager();
