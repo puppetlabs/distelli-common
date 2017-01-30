@@ -365,7 +365,7 @@ public class DiskObjectStore extends AbstractObjectStore
             throw(new EntityNotFoundException("Bucket "+partKey.getBucket()+" does not exist"));
         Path objFile = Paths.get(bucketRoot.toString(), toKeyId(partKey.getKey()));
         Path parentDir = objFile.getParent();
-        if(parentDir != null && Files.exists(parentDir))
+        if(parentDir != null && !Files.exists(parentDir))
             parentDir.toFile().mkdirs();
         try ( OutputStream out = Files.newOutputStream(objFile) ) {
             for ( ObjectPartId partId : partIds ) {
