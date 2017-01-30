@@ -54,7 +54,7 @@ public class AjaxRequestHandler extends RequestHandler
             String operation = ajaxRequest.getOperation();
             if(operation == null)
                 return jsonError(JsonError.UnsupportedOperation);
-            AjaxHelper ajaxHelper = _ajaxHelperMap.get(operation);
+            AjaxHelper ajaxHelper = _ajaxHelperMap.get(operation, requestContext);
             if(ajaxHelper == null)
                 return jsonError(JsonError.UnsupportedOperation);
             if(!ajaxHelper.isMethodSupported(httpMethod))

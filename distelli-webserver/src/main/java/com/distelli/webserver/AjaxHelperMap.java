@@ -8,7 +8,7 @@
 */
 package com.distelli.webserver;
 
-public interface AjaxHelperMap
+public interface AjaxHelperMap<R extends RequestContext>
 {
-    public AjaxHelper get(String operationName);
+    public AjaxHelper get(String operationName, R RequestContext);
 }
