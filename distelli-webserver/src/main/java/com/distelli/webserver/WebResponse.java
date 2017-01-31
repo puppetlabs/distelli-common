@@ -20,6 +20,7 @@ public class WebResponse
 {
     private int _httpStatusCode = 200;
     private String _contentType = "text/html";
+    private String _characterEncoding = "UTF-8";
     private byte[] _responseContent;
     private Map<String, String> _responseHeaders = new TreeMap<String, String>();
     private ResponseWriter _responseWriter = null;
@@ -65,6 +66,14 @@ public class WebResponse
 
     public void setContentType(String contentType) {
         this._contentType = contentType;
+    }
+
+    public String getCharacterEncoding() {
+        return this._characterEncoding;
+    }
+
+    public void setCharacterEncoding(String characterEncoding) {
+        this._characterEncoding = characterEncoding;
     }
 
     public byte[] getResponseContent() {

@@ -157,7 +157,7 @@ public class WebServlet<RCTX extends RequestContext> extends HttpServlet
                               " for Request: "+requestContext.getRequestId());
 
                 response.setContentType(webResponse.getContentType());
-                response.setCharacterEncoding("UTF-8");
+                response.setCharacterEncoding(webResponse.getCharacterEncoding());
 
                 Map<String, String> responseHeaders = webResponse.getResponseHeaders();
                 writeGZipped = requestContext.isGZipAccepted();
