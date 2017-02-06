@@ -68,7 +68,7 @@ public class JsonError
         return this.error;
     }
 
-    protected int getHttpStatusCode()
+    public int getHttpStatusCode()
     {
         return httpStatusCode;
     }

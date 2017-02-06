@@ -18,11 +18,10 @@ import org.slf4j.LoggerFactory;
 @Singleton
 public class AjaxRequestHandler extends RequestHandler
 {
-    @Inject
-    private AjaxHelperMap _ajaxHelperMap;
-
     private static final Logger log = LoggerFactory.getLogger(AjaxRequestHandler.class);
 
+    @Inject
+    private AjaxHelperMap _ajaxHelperMap;
     public AjaxRequestHandler()
     {
 
@@ -48,17 +47,28 @@ public class AjaxRequestHandler extends RequestHandler
             } else if(httpMethod == HTTPMethod.GET) {
                 ajaxRequest = AjaxRequest.fromQueryParams(requestContext.getQueryParams());
             } else {
+                if(log.isDebugEnabled())
+                    log.debug("Unsupported HTTPMethod: "+httpMethod+" for AjaxRequest: "+requestContext);
                 return jsonError(JsonError.UnsupportedHttpMethod);
             }
 
             String operation = ajaxRequest.getOperation();
-            if(operation == null)
+            if(operation == null) {
+                if(log.isDebugEnabled())
+                    log.debug("Null Operation for AjaxRequest: "+requestContext);
                 return jsonError(JsonError.UnsupportedOperation);
+            }
             AjaxHelper ajaxHelper = _ajaxHelperMap.get(operation, requestContext);
-            if(ajaxHelper == null)
+            if(ajaxHelper == null) {
+                if(log.isDebugEnabled())
+                    log.debug("No AjaxHelper for Operation: "+operation+" for AjaxRequest: "+requestContext);
                 return jsonError(JsonError.UnsupportedOperation);
-            if(!ajaxHelper.isMethodSupported(httpMethod))
+            }
+            if(!ajaxHelper.isMethodSupported(httpMethod)) {
+                if(log.isDebugEnabled())
+                    log.debug("HTTP Method not supported by Operation: "+operation+" for AjaxRequest: "+requestContext);
                 return jsonError(JsonError.UnsupportedHttpMethod);
+            }
             Object response = ajaxHelper.get(ajaxRequest, requestContext);
             if(response != null)
                 return toJson(response);
