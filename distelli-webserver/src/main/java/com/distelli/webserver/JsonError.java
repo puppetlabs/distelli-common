@@ -6,7 +6,7 @@ public class JsonError
     public static JsonError MalformedRequest = new JsonError("The request is Malformed", Codes.MalformedRequest, 400);
     public static JsonError UnsupportedHttpMethod = new JsonError("The HttpMethod is unsupported", Codes.UnsupportedHttpMethod, 400);
     public static JsonError UnsupportedOperation = new JsonError("The Operation is unsupported", Codes.UnsupportedOperation, 400);
-    public static JsonError InternalServerError = new JsonError("An Internal Server Error occured", Codes.InternalServerError, 500);
+    public static JsonError InternalServerError = new JsonError("An Internal Server Error occurred", Codes.InternalServerError, 500);
     public static JsonError BadContentType = new JsonError("The content type is unsupported", Codes.BadContentType, 400);
     public static JsonError BadContent = new JsonError("The content field is missing or invalid", Codes.BadContent, 400);
     public static JsonError MissingParam = new JsonError("Missing param in request", Codes.MissingParam, 400);
