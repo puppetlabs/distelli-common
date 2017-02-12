@@ -146,6 +146,8 @@ public class WebSession
                     webSession.vars = new HashMap<String, String>();
                 webSession.vars.putAll(vars);
             }
+            if(webSession.vars == null)
+                webSession.vars = new HashMap<String, String>();
             if(isLoggedIn != null)
                 webSession.setLoggedIn(isLoggedIn.booleanValue());
             if(_lastActiveTimeMillis != 0)
@@ -170,6 +172,9 @@ public class WebSession
                     throw(new RuntimeException(t));
                 }
             }
+            if(webSession.vars == null)
+                webSession.vars = new HashMap<String, String>();
+
             webSession.setLastActiveTime(_lastActiveTimeMillis);
             return webSession;
         }
