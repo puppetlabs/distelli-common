@@ -224,7 +224,7 @@ public class WebResponse
 
     public static WebResponse jsonError(JsonError jsonError)
     {
-        int httpStatusCode = jsonError.getHttpStatusCode();
+        int httpStatusCode = jsonError.httpStatusCode();
         if(httpStatusCode == -1)
             httpStatusCode = 400;
         return toJson(jsonError, httpStatusCode);

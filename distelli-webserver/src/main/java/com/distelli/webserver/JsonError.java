@@ -68,21 +68,21 @@ public class JsonError
         return this.error;
     }
 
-    public String getErrorCode()
+    public String errorCode()
     {
         if(this.error == null)
             return null;
         return this.error.getCode();
     }
 
-    public String getErrorMessage()
+    public String errorMessage()
     {
         if(this.error == null)
             return null;
         return this.error.getMessage();
     }
 
-    public int getHttpStatusCode()
+    public int httpStatusCode()
     {
         return httpStatusCode;
     }
