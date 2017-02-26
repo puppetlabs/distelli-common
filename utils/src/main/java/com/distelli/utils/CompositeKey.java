@@ -39,6 +39,12 @@ public class CompositeKey
             return this;
         }
 
+        public Builder withString(long part)
+        {
+            this.parts.add(String.format("%d", part));
+            return this;
+        }
+
         public Builder withLong(long part)
         {
             this.parts.add(LongSortKey.longToSortKey(part));
@@ -68,14 +74,18 @@ public class CompositeKey
 
     }
 
-    public static String build(String... parts)
+    public static CompositeKey.Builder builder()
     {
-        return new Builder().withStrings(parts).build();
+        return new CompositeKey.Builder();
     }
 
+    public static String build(String... parts)
+    {
+        return builder().withStrings(parts).build();
+    }
     public static String build(long... parts)
     {
-        return new Builder().withLongs(parts).build();
+        return builder().withLongs(parts).build();
     }
 
     public static long[] splitLongs(String key)
@@ -93,12 +103,12 @@ public class CompositeKey
 
     public static String buildPrefix(String... parts)
     {
-        return new Builder().withStrings(parts).buildPrefix();
+        return builder().withStrings(parts).buildPrefix();
     }
 
     public static String buildPrefix(long... parts)
     {
-        return new Builder().withLongs(parts).buildPrefix();
+        return builder().withLongs(parts).buildPrefix();
     }
 
     public static String[] split(String key)

@@ -94,4 +94,28 @@ public class TestCompositeKey
         String key = CompositeKey.buildPrefix(parts);
         assertThat(key, equalTo("........../\u001e..........0\u001e..........1\u001e"));
     }
+
+    @Test
+    public void testBuildStringLong()
+    {
+        String key = CompositeKey
+        .builder()
+        .withString(1L)
+        .withString("a")
+        .withString(2L)
+        .build();
+        assertThat(key, equalTo("1\u001ea\u001e2"));
+    }
+
+    @Test
+    public void testBuildPrefixStringLong()
+    {
+        String key = CompositeKey
+        .builder()
+        .withString(1L)
+        .withString("a")
+        .withString(2L)
+        .buildPrefix();
+        assertThat(key, equalTo("1\u001ea\u001e2\u001e"));
+    }
 }
