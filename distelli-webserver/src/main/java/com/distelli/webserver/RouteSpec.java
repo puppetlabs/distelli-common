@@ -2,48 +2,49 @@ package com.distelli.webserver;
 
 import javax.servlet.http.HttpServlet;
 
-public class RouteSpec
+public class RouteSpec extends GenericRouteSpec<Class<? extends RequestHandler>>
 {
-    private String _path = null;
-    private HTTPMethod _httpMethod = null;
-    private Class<? extends RequestHandler> _requestHandler = null;
+    public static class Builder
+    {
+        private GenericRouteSpec.Builder<Class<? extends RequestHandler>, RouteSpec> _builder =
+            new GenericRouteSpec.Builder<Class<? extends RequestHandler>, RouteSpec>(RouteSpec::new);
 
-    public static class Builder {
-        private String _path = null;
-        private HTTPMethod _httpMethod = null;
-        private Class<? extends RequestHandler> _requestHandler = null;
-
-        public Builder withPath(String path) { _path = path; return this;}
-        public Builder withHTTPMethod(HTTPMethod httpMethod) { _httpMethod = httpMethod; return this;}
-        public Builder withRequestHandler(Class<? extends RequestHandler> requestHandler) {_requestHandler = requestHandler; return this;}
+        public Builder withPath(String path) {
+            _builder.withPath(path);
+            return this;
+        }
+        public Builder withHTTPMethod(HTTPMethod httpMethod) {
+            _builder.withHTTPMethod(httpMethod);
+            return this;
+        }
+        public Builder withRequestHandler(Class<? extends RequestHandler> requestHandler) {
+            _builder.withValue(requestHandler);
+            return this;
+        }
         public RouteSpec build() {
-            RouteSpec routeSpec = new RouteSpec();
-            routeSpec._path = _path;
-            routeSpec._httpMethod = _httpMethod;
-            routeSpec._requestHandler = _requestHandler;
-            return routeSpec;
+            return _builder.build();
         }
     }
 
-    public String getPath() {
-        return this._path;
+    public RouteSpec(GenericRouteSpec<Class<? extends RequestHandler>> copy) {
+        super(copy);
     }
 
-    public HTTPMethod getHttpMethod() {
-        return this._httpMethod;
+    public RouteSpec(RouteSpec copy) {
+        super(copy);
     }
 
     public Class<? extends RequestHandler> getRequestHandler()
     {
-        return _requestHandler;
+        return getValue();
     }
 
     @Override
     public String toString()
     {
         return String.format("RouteSpec[path=%s, httpMethod=%s, requestHandler=%s",
-                             _path,
-                             _httpMethod,
-                             _requestHandler);
+                             getPath(),
+                             getHttpMethod(),
+                             getValue());
     }
 }

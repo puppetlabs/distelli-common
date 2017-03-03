@@ -24,6 +24,7 @@
     <module>object-store-impl</module>
     <module>distelli-webserver</module>
     <module>utils</module>
+    <module>guice-runner</module>
   </modules>
   <scm>
     <connection>scm:git:git@github.com:Distelli/distelli-common.git</connection>
