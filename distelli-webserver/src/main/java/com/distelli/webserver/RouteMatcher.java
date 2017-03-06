@@ -19,6 +19,9 @@ public class RouteMatcher extends GenericRouteMatcher<Class<? extends RequestHan
 {
     @Override
     public MatchedRoute match(HTTPMethod httpMethod, String path) {
-        return new MatchedRoute(match(httpMethod, path));
+        return new MatchedRoute(super.match(httpMethod, path));
+    }
+    public void setDefaultRequestHandler(Class<? extends RequestHandler> defaultVal) {
+        setDefault(defaultVal);
     }
 }

@@ -1,14 +1,15 @@
 package com.distelli.webserver;
 
-import javax.servlet.http.HttpServlet;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.net.URLDecoder;
 import java.io.UnsupportedEncodingException;
+import java.util.Collections;
+import java.util.Arrays;
 
 /**
    The route matcher matches HTTP routes against a resourceURI
@@ -17,133 +18,144 @@ import java.io.UnsupportedEncodingException;
 */
 public class GenericRouteMatcher<T>
 {
-    private ArrayList<GenericRouteSpec<T>> _routes = null;
-    private T _default = null;
-
-    public GenericRouteMatcher()
-    {
-        _routes = new ArrayList<GenericRouteSpec<T>>();
+    private static Pattern NAMED_COMP_REGEX = Pattern.compile(":[a-zA-Z0-9_\\\\-\\\\.~]*|\\*");
+    // Path components are separated by /, so use that as the special key
+    // to denote that all path components match:
+    private static String GLOB_KEY = "/";
+    private static class Node<T> {
+        protected Map<String, Node<T>> paths;
+        // Leaf:
+        protected GenericRouteSpec<T> routeSpec;
+        protected List<String> paramNames;
     }
 
-    public List<GenericRouteSpec<T>> getAllRoutes()
-    {
-        return _routes;
+    private Node<T> root = new Node<>();
+    private T defaultValue;
+
+    public List<GenericRouteSpec<T>> getAllRoutes() {
+        List<GenericRouteSpec<T>> result = new ArrayList<>();
+        List<Node<T>> stack = new ArrayList<>();
+        stack.add(root);
+        while ( ! stack.isEmpty() ) {
+            Node<T> node = stack.remove(stack.size()-1);
+            if ( null != node.routeSpec ) {
+                result.add(node.routeSpec);
+            }
+            if ( null == node.paths ) continue;
+            stack.addAll(node.paths.values());
+        }
+        return result;
     }
 
-    public void add(String httpMethod, String path, HttpServlet servlet)
-    {
-        HTTPMethod httpMethodEnum = HTTPMethod.valueOf(httpMethod);
-        GenericRouteSpec<T> routeSpec = GenericRouteSpec.<T>builder()
-            .withPath(path)
-            .withHTTPMethod(httpMethodEnum)
-            .build();
-
-        _routes.add(routeSpec);
+    public void add(GenericRouteSpec<T> routeSpec) {
+        add(root, toComponents(routeSpec.getHttpMethod(), routeSpec.getPath()), new ArrayList<String>(), routeSpec);
     }
 
-    public void add(String httpMethod, String path, T value)
-    {
+    public void add(String httpMethod, String path, T value) {
+
         HTTPMethod httpMethodEnum = HTTPMethod.valueOf(httpMethod);
         GenericRouteSpec<T> routeSpec = GenericRouteSpec.<T>builder()
             .withPath(path)
             .withHTTPMethod(httpMethodEnum)
             .withValue(value)
             .build();
-        _routes.add(routeSpec);
+        add(routeSpec);
     }
 
     public void setDefault(T defaultVal)
     {
-        _default = defaultVal;
+        defaultValue = defaultVal;
     }
 
-    public GenericMatchedRoute<T> match(HTTPMethod httpMethod, String path)
-    {
-        Map<String, String> routeParams = new HashMap<String, String>();
-        for(GenericRouteSpec<T> routeSpec : _routes)
-        {
-            if(matches(routeSpec.getPath(), routeSpec.getHttpMethod(), httpMethod, path, routeParams))
-            {
-                GenericMatchedRoute<T> matchedRoute = new GenericMatchedRoute<T>(routeSpec, routeParams);
-                return matchedRoute;
-            }
-        }
-
-        if(_default == null)
-            return null;
-        //else return the default route
-        GenericRouteSpec<T> defaultRouteSpec = GenericRouteSpec.<T>builder()
+    public GenericMatchedRoute<T> match(HTTPMethod httpMethod, String path) {
+        GenericMatchedRoute<T> result =
+            match(root, toComponents(httpMethod, path), new ArrayList<>());
+        if ( null != result ) return result;
+        if ( null == defaultValue ) return null;
+        return new GenericMatchedRoute<T>(
+            GenericRouteSpec.<T>builder()
             .withPath(path)
             .withHTTPMethod(httpMethod)
-            .withValue(_default)
-            .build();
-
-        GenericMatchedRoute<T> defaultRoute = new GenericMatchedRoute<T>(defaultRouteSpec, null);
-        return defaultRoute;
+            .withValue(defaultValue)
+            .build(),
+            Collections.emptyMap());
     }
 
-    private static boolean matches(String route, HTTPMethod routeMethod, HTTPMethod requestMethod, String resourceURI, Map<String, String> routeParams)
-    {
-        return matches(route, new HTTPMethod[]{routeMethod}, requestMethod, resourceURI, routeParams);
+
+    private GenericMatchedRoute<T> match(Node<T> node, List<String> components, List<String> paramValues) {
+        if ( components.isEmpty() ) {
+            // Leaf:
+            if ( null == node.routeSpec ) return null;
+            Map<String, String> params = new LinkedHashMap<>();
+            for ( int i=0; i < paramValues.size(); i++ ) {
+                params.put(node.paramNames.get(i), paramValues.get(i));
+            }
+            return new GenericMatchedRoute<T>(
+                node.routeSpec,
+                Collections.unmodifiableMap(params));
+        }
+        if ( null == node.paths ) {
+            return null;
+        }
+        Node<T> child = node.paths.get(components.get(0));
+        GenericMatchedRoute<T> result;
+        if ( null != child ) {
+            result = match(child, components.subList(1, components.size()), paramValues);
+            if ( null != result ) {
+                return result;
+            }
+        }
+        child = node.paths.get(GLOB_KEY);
+        if ( null == child ) return null;
+        paramValues.add(components.get(0));
+        result = match(child, components.subList(1, components.size()), paramValues);
+        if ( null != result ) {
+            return result;
+        }
+        paramValues.remove(paramValues.size()-1);
+        return null;
     }
 
-    private static boolean matches(String route, HTTPMethod[] routeMethods, HTTPMethod requestMethod, String resourceURI, Map<String, String> routeParams)
-    {
-        boolean methodMatches = false;
-        for(HTTPMethod method : routeMethods)
-        {
-            if(method == requestMethod)
-            {
-                methodMatches = true;
-                break;
-            }
+    private List<String> toComponents(HTTPMethod httpMethod, String path) {
+        // Trim off beginning slash:
+        if ( path.startsWith("/") ) {
+            path = path.substring(1);
         }
+        // Trim off any trailing slashes:
+        path = path.replaceAll("/+$", "");
+        List<String> components = new ArrayList<>();
+        components.add(httpMethod.toString());
+        components.addAll(Arrays.asList(path.split("/")));
+        return components;
+    }
 
-        if(!methodMatches)
-            return false;
-
-        String regexRoute = route.replaceAll(":[a-zA-Z0-9_\\\\-\\\\.~]*", "(*)");
-        regexRoute = regexRoute.replaceAll("\\*", "[^/]*");
-
-        Pattern pattern = Pattern.compile(regexRoute);
-        Matcher matcher = pattern.matcher(resourceURI);
-
-        boolean matches = matcher.matches();
-        if(!matches)
-            return false;
-
-        int groupCount = matcher.groupCount();
-        if(groupCount <= 0)
-            return true;
-
-        if(routeParams == null)
-            return true;
-
-        String[] parts = route.split("/");
-        int index = 1;
-        for(String part : parts)
-        {
-            if(part.startsWith(":"))
-            {
-                String paramVal = matcher.group(index);
-                if(paramVal != null && paramVal.length() > 0)
-                {
-                    String urlDecoded = null;
-                    try
-                    {
-                        urlDecoded = URLDecoder.decode(paramVal, "UTF-8");
-                    }
-                    catch(UnsupportedEncodingException usee)
-                    {
-                        //cannot happen
-                        throw(new RuntimeException(usee));
-                    }
-                    routeParams.put(part.substring(1), urlDecoded);
-                }
-                index++;
+    private void add(Node<T> node, List<String> components, List<String> paramNames, GenericRouteSpec<T> routeSpec) {
+        if ( components.isEmpty() ) {
+            // Leaf:
+            if ( null != node.routeSpec ) {
+                throw new RouteMatcherConflict(
+                    routeSpec.getHttpMethod() + " " + routeSpec.getPath() +
+                    " " + routeSpec.getValue() + " conflicts with " + node.routeSpec +
+                    " paramNames="+node.paramNames);
             }
+            node.routeSpec = routeSpec;
+            node.paramNames = paramNames;
+            return;
         }
-
-        return true;
+        if ( null == node.paths ) {
+            node.paths = new LinkedHashMap<>();
+        }
+        String component = components.remove(0);
+        if ( NAMED_COMP_REGEX.matcher(component).matches() ) {
+            paramNames.add(component.substring(1));
+            component = GLOB_KEY;
+        }
+        Node<T> child = node.paths.get(component);
+        if ( null == child ) {
+            child = new Node<>();
+            node.paths.put(component, child);
+        }
+        // Tail recursion:
+        add(child, components, paramNames, routeSpec);
     }
 }
