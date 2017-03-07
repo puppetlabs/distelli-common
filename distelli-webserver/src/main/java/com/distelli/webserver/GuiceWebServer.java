@@ -15,6 +15,8 @@ import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.server.ServerConnector;
 import java.util.Set;
 import javax.inject.Inject;
+import java.nio.file.Paths;
+import org.eclipse.jetty.server.handler.AllowSymLinkAliasChecker;
 
 public class GuiceWebServer implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(GuiceWebServer.class);
@@ -28,10 +30,11 @@ public class GuiceWebServer implements Runnable {
             routeMatcher.add(routeSpec);
         }
         routeMatcher.setDefault(
-            (method, req, res) ->
-            req.getServletContext()
-            .getNamedDispatcher(STATIC_SERVLET_NAME)
-            .forward(req, res));
+            (method, req, res) -> {
+                req.getServletContext()
+                    .getNamedDispatcher(STATIC_SERVLET_NAME)
+                    .forward(req, res);
+            });
     }
 
     private static int SESSION_MAX_AGE = 2592000; //default is 30 days
@@ -43,25 +46,27 @@ public class GuiceWebServer implements Runnable {
     public void run(String portStr) {
         int port = (null == portStr) ? 8080 : Integer.parseInt(portStr);
 
-        Server server = new Server(port);
-
         ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
         context.setSessionHandler(new SessionHandler(new HashSessionManager()));
         context.setContextPath("/");
         context.setInitParameter("org.eclipse.jetty.servlet.MaxAge", ""+SESSION_MAX_AGE);
-        server.setHandler(context);
+        context.addAliasCheck(new AllowSymLinkAliasChecker());
 
         ServletHolder servletHolder = new ServletHolder(new RouteMatcherServlet(routeMatcher));
         context.addServlet(servletHolder, "/");
 
         ServletHolder staticHolder = new ServletHolder(STATIC_SERVLET_NAME, DefaultServlet.class);
-        staticHolder.setInitParameter("resourceBase", ".");
+        staticHolder.setInitParameter("resourceBase", Paths.get("").toAbsolutePath().toString());
         staticHolder.setInitParameter("dirAllowed","true");
         staticHolder.setInitParameter("etags", "true");
         staticHolder.setInitParameter("gzip", "true");
+        staticHolder.setInitParameter("aliases", "true");
         staticHolder.setInitParameter("cacheControl", "max-age=3600");
-        // Map to the same path since this is only routed to by name.
+        // Don't really want this mapped to anything (only used for forwarding):
         context.addServlet(staticHolder, "");
+
+        Server server = new Server(port);
+        server.setHandler(context);
 
         try {
             server.start();
