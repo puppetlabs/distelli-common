@@ -10,6 +10,8 @@ import java.net.URLDecoder;
 import java.io.UnsupportedEncodingException;
 import java.util.Collections;
 import java.util.Arrays;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
    The route matcher matches HTTP routes against a resourceURI
@@ -18,6 +20,7 @@ import java.util.Arrays;
 */
 public class GenericRouteMatcher<T>
 {
+    private static final Logger LOG = LoggerFactory.getLogger(GenericRouteMatcher.class);
     private static Pattern NAMED_COMP_REGEX = Pattern.compile(":[a-zA-Z0-9_\\\\-\\\\.~]*|\\*");
     // Path components are separated by /, so use that as the special key
     // to denote that all path components match:
@@ -70,7 +73,10 @@ public class GenericRouteMatcher<T>
     public GenericMatchedRoute<T> match(HTTPMethod httpMethod, String path) {
         GenericMatchedRoute<T> result =
             match(root, toComponents(httpMethod, path), new ArrayList<>());
-        if ( null != result ) return result;
+        if ( null != result ) {
+            if ( LOG.isDebugEnabled() ) LOG.debug("Route matched: "+result);
+            return result;
+        }
         if ( null == defaultValue ) return null;
         return new GenericMatchedRoute<T>(
             GenericRouteSpec.<T>builder()

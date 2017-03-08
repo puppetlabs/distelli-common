@@ -47,4 +47,10 @@ public class GenericMatchedRoute<T>
     {
         return _routeSpec.getValue();
     }
+
+    @Override
+    public String toString() {
+        return "GenericMatchedRoute[routeSpec="+_routeSpec+
+            ",routeParams="+_routeParams+"]";
+    }
 }

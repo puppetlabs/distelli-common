@@ -17,11 +17,24 @@ import java.util.Set;
 import javax.inject.Inject;
 import java.nio.file.Paths;
 import org.eclipse.jetty.server.handler.AllowSymLinkAliasChecker;
+import org.eclipse.jetty.servlet.ErrorPageErrorHandler;
 
 public class GuiceWebServer implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(GuiceWebServer.class);
     private static final String STATIC_SERVLET_NAME = "static";
+    private static final GenericRequestHandler DEFAULT_REQUEST_HANDLER = (method, req, res) -> {
+        if ( LOG.isDebugEnabled() ) {
+            LOG.debug("Dispatching to static servlet {}", req.getRequestURI());
+        }
+        req.getServletContext().getNamedDispatcher(STATIC_SERVLET_NAME)
+        .forward(req, res);
+    };
+
     private GenericRouteMatcher<GenericRequestHandler> routeMatcher;
+
+    public static GenericRequestHandler getDefaultRequestHandler() {
+        return DEFAULT_REQUEST_HANDLER;
+    }
 
     @Inject
     protected GuiceWebServer(Set<GenericRouteSpec<GenericRequestHandler>> routeSpecs) {
@@ -29,15 +42,8 @@ public class GuiceWebServer implements Runnable {
         for ( GenericRouteSpec<GenericRequestHandler> routeSpec : routeSpecs ) {
             routeMatcher.add(routeSpec);
         }
-        routeMatcher.setDefault(
-            (method, req, res) -> {
-                req.getServletContext()
-                    .getNamedDispatcher(STATIC_SERVLET_NAME)
-                    .forward(req, res);
-            });
+        routeMatcher.setDefault(DEFAULT_REQUEST_HANDLER);
     }
-
-    private static int SESSION_MAX_AGE = 2592000; //default is 30 days
 
     public void run() {
         run(null);
@@ -46,10 +52,11 @@ public class GuiceWebServer implements Runnable {
     public void run(String portStr) {
         int port = (null == portStr) ? 8080 : Integer.parseInt(portStr);
 
-        ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
-        context.setSessionHandler(new SessionHandler(new HashSessionManager()));
+        ErrorPageErrorHandler errorHandler = new ErrorPageErrorHandler();
+        errorHandler.addErrorPage(404, "/404");
+        ServletContextHandler context = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
+        context.setErrorHandler(errorHandler);
         context.setContextPath("/");
-        context.setInitParameter("org.eclipse.jetty.servlet.MaxAge", ""+SESSION_MAX_AGE);
         context.addAliasCheck(new AllowSymLinkAliasChecker());
 
         ServletHolder servletHolder = new ServletHolder(new RouteMatcherServlet(routeMatcher));
@@ -57,6 +64,7 @@ public class GuiceWebServer implements Runnable {
 
         ServletHolder staticHolder = new ServletHolder(STATIC_SERVLET_NAME, DefaultServlet.class);
         staticHolder.setInitParameter("resourceBase", Paths.get("").toAbsolutePath().toString());
+        staticHolder.setInitParameter("welcomeServlets", "true");
         staticHolder.setInitParameter("dirAllowed","true");
         staticHolder.setInitParameter("etags", "true");
         staticHolder.setInitParameter("gzip", "true");
@@ -70,7 +78,7 @@ public class GuiceWebServer implements Runnable {
 
         try {
             server.start();
-            LOG.info("Listening on port "+port);
+            LOG.info("Listening on port {}", port);
             server.join();
         } catch ( RuntimeException ex ) {
             throw ex;

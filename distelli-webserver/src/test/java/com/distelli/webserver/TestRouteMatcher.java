@@ -35,6 +35,14 @@ public class TestRouteMatcher {
         }
     }
 
+    @Test
+    public void testSlash() {
+        GenericRouteMatcher<Integer> routeMatcher = new GenericRouteMatcher<>();
+        routeMatcher.add("GET", "/:foo", 1);
+        routeMatcher.add("GET", "/", 2);
+        assertEquals(2, match(routeMatcher, "GET", "").getValue().intValue());
+    }
+
     protected <T> GenericMatchedRoute<T> match(GenericRouteMatcher<T> routeMatcher, String httpMethod, String path) {
         return routeMatcher.match(HTTPMethod.valueOf(httpMethod), path);
     }
