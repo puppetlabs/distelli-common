@@ -7,6 +7,6 @@ import java.io.IOException;
 
 @FunctionalInterface
 public interface GenericRequestHandler {
-    public void service(HTTPMethod httpMethod, HttpServletRequest request, HttpServletResponse response)
+    public void service(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException;
 }

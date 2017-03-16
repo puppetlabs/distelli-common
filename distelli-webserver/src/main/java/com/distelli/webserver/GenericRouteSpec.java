@@ -63,7 +63,7 @@ public class GenericRouteSpec<T>
     @Override
     public String toString()
     {
-        return String.format("RouteSpec[path=%s, httpMethod=%s, value=%s",
+        return String.format("RouteSpec[path=%s, httpMethod=%s, value=%s]",
                              _path,
                              _httpMethod,
                              _value);

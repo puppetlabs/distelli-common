@@ -17,73 +17,67 @@ public class RouteMatcherServlet extends HttpServlet implements GenericRequestHa
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException
     {
-        service(HTTPMethod.GET, request, response);
+        service(request, response);
     }
 
     @Override
     protected void doPut(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException
     {
-        service(HTTPMethod.PUT, request, response);
+        service(request, response);
     }
 
     @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException
     {
-        service(HTTPMethod.POST, request, response);
+        service(request, response);
     }
 
     @Override
     protected void doDelete(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException
     {
-        service(HTTPMethod.DELETE, request, response);
+        service(request, response);
     }
 
     @Override
     protected void doTrace(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException
     {
-        service(HTTPMethod.TRACE, request, response);
+        service(request, response);
     }
 
     @Override
     protected void doHead(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException
     {
-        service(HTTPMethod.HEAD, request, response);
+        service(request, response);
     }
 
     @Override
     protected void doOptions(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException
     {
-        service(HTTPMethod.OPTIONS, request, response);
+        service(request, response);
     }
 
     protected void doPatch(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException
     {
-        service(HTTPMethod.PATCH, request, response);
+        service(request, response);
     }
 
     @Override
-    protected void service(HttpServletRequest request, HttpServletResponse response)
+    public void service(HttpServletRequest request, HttpServletResponse response)
         throws ServletException, IOException
     {
-        service(HTTPMethod.valueOf(request.getMethod().toUpperCase()), request, response);
-    }
-
-    @Override
-    public void service(HTTPMethod method, HttpServletRequest request, HttpServletResponse response)
-        throws ServletException, IOException
-    {
+        HTTPMethod method = HTTPMethod.valueOf(request.getMethod().toUpperCase());
         GenericMatchedRoute<GenericRequestHandler> route = routeMatcher.match(method, request.getRequestURI());
         if ( null == route ) {
             throw new IllegalStateException("route matcher not configured with a default route!");
         }
         request.setAttribute(MATCHED_ROUTE, route);
-        route.getValue().service(method, request, response);
+        route.getValue().service(request, response);
     }
 }

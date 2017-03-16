@@ -1,48 +1,78 @@
 package com.distelli.webserver;
 
+import com.distelli.utils.TopoSort;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import javax.inject.Inject;
+import javax.servlet.DispatcherType;
 import javax.servlet.http.HttpServlet;
 import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.SessionManager;
+import org.eclipse.jetty.server.handler.AllowSymLinkAliasChecker;
+import org.eclipse.jetty.server.handler.ErrorHandler;
 import org.eclipse.jetty.server.session.HashSessionManager;
 import org.eclipse.jetty.server.session.SessionHandler;
 import org.eclipse.jetty.servlet.DefaultServlet;
+import org.eclipse.jetty.servlet.ErrorPageErrorHandler;
+import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.eclipse.jetty.server.handler.ErrorHandler;
-import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.eclipse.jetty.server.ServerConnector;
-import java.util.Set;
-import javax.inject.Inject;
-import java.nio.file.Paths;
-import org.eclipse.jetty.server.handler.AllowSymLinkAliasChecker;
-import org.eclipse.jetty.servlet.ErrorPageErrorHandler;
 
 public class GuiceWebServer implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(GuiceWebServer.class);
     private static final String STATIC_SERVLET_NAME = "static";
-    private static final GenericRequestHandler DEFAULT_REQUEST_HANDLER = (method, req, res) -> {
+    private static final GenericRequestHandler DEFAULT_REQUEST_HANDLER = (req, res) -> {
         if ( LOG.isDebugEnabled() ) {
-            LOG.debug("Dispatching to static servlet {}", req.getRequestURI());
+            LOG.debug("Dispatching to static servlet {} with response={}", req.getRequestURI(), res);
         }
         req.getServletContext().getNamedDispatcher(STATIC_SERVLET_NAME)
         .forward(req, res);
     };
 
     private GenericRouteMatcher<GenericRequestHandler> routeMatcher;
+    private List<GenericFilter> filters;
 
     public static GenericRequestHandler getDefaultRequestHandler() {
         return DEFAULT_REQUEST_HANDLER;
     }
 
     @Inject
-    protected GuiceWebServer(Set<GenericRouteSpec<GenericRequestHandler>> routeSpecs) {
+    protected GuiceWebServer(
+        Set<GenericRouteSpec<GenericRequestHandler>> routeSpecs,
+        Map<String, GenericFilterSpec<GenericFilter>> filterSpecs)
+    {
         routeMatcher = new GenericRouteMatcher<GenericRequestHandler>();
         for ( GenericRouteSpec<GenericRequestHandler> routeSpec : routeSpecs ) {
             routeMatcher.add(routeSpec);
         }
         routeMatcher.setDefault(DEFAULT_REQUEST_HANDLER);
+
+        TopoSort<GenericFilterSpec<GenericFilter>> sorter = new TopoSort<>();
+        for ( GenericFilterSpec<GenericFilter> filterSpec : filterSpecs.values() ) {
+            LOG.debug("Injected filterSpec="+filterSpec);
+            sorter.add(filterSpec);
+            for ( String name : filterSpec.getAfter() ) {
+                GenericFilterSpec<GenericFilter> dependency =
+                    filterSpecs.get(name);
+                if ( null != dependency ) {
+                    sorter.add(filterSpec, dependency);
+                } else {
+                    // Might be fine, so simply log this:
+                    LOG.debug("Filter '"+filterSpec.getName()+
+                              "' must come after an undefined filter name='"+name+"'");
+                }
+            }
+        }
+        filters = new ArrayList<>();
+        sorter.reverseSort((filterSpec) -> filters.add(filterSpec.getValue()));
     }
 
     public void run() {
@@ -60,7 +90,7 @@ public class GuiceWebServer implements Runnable {
         context.addAliasCheck(new AllowSymLinkAliasChecker());
 
         ServletHolder servletHolder = new ServletHolder(new RouteMatcherServlet(routeMatcher));
-        context.addServlet(servletHolder, "/");
+        context.addServlet(servletHolder, "/*");
 
         ServletHolder staticHolder = new ServletHolder(STATIC_SERVLET_NAME, DefaultServlet.class);
         staticHolder.setInitParameter("resourceBase", Paths.get("").toAbsolutePath().toString());
@@ -70,8 +100,13 @@ public class GuiceWebServer implements Runnable {
         staticHolder.setInitParameter("gzip", "true");
         staticHolder.setInitParameter("aliases", "true");
         staticHolder.setInitParameter("cacheControl", "max-age=3600");
-        // Don't really want this mapped to anything (only used for forwarding):
         context.addServlet(staticHolder, "");
+
+        for ( GenericFilter filter : filters ) {
+            LOG.debug("Adding filter="+filter);
+            FilterHolder holder = new FilterHolder(filter.toServletFilter());
+            context.addFilter(holder, "/*", EnumSet.of(DispatcherType.REQUEST));
+        }
 
         Server server = new Server(port);
         server.setHandler(context);

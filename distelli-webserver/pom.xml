@@ -82,6 +82,12 @@
     </dependency>
 
     <dependency>
+      <groupId>com.distelli.utils</groupId>
+      <artifactId>Utilities</artifactId>
+      <version>8.3.1-SNAPSHOT</version>
+    </dependency>
+
+    <dependency>
       <groupId>com.google.inject.extensions</groupId>
       <artifactId>guice-assistedinject</artifactId>
       <version>${guice.version}</version>

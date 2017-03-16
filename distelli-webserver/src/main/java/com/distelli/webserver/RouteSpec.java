@@ -42,7 +42,7 @@ public class RouteSpec extends GenericRouteSpec<Class<? extends RequestHandler>>
     @Override
     public String toString()
     {
-        return String.format("RouteSpec[path=%s, httpMethod=%s, requestHandler=%s",
+        return String.format("RouteSpec[path=%s, httpMethod=%s, requestHandler=%s]",
                              getPath(),
                              getHttpMethod(),
                              getValue());
