@@ -113,13 +113,21 @@ public class GenericRouteMatcher<T>
         }
         child = node.paths.get(GLOB_KEY);
         if ( null == child ) return null;
-        paramValues.add(components.get(0));
+        paramValues.add(urlDecode(components.get(0)));
         result = match(child, components.subList(1, components.size()), paramValues);
         if ( null != result ) {
             return result;
         }
         paramValues.remove(paramValues.size()-1);
         return null;
+    }
+
+    private static String urlDecode(String str) {
+        try {
+            return URLDecoder.decode(str, "UTF-8");
+        } catch ( UnsupportedEncodingException ex ) {
+            throw new RuntimeException(ex);
+        }
     }
 
     private List<String> toComponents(HTTPMethod httpMethod, String path) {
