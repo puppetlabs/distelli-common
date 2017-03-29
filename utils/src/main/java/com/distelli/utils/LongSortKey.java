@@ -4,13 +4,14 @@ package com.distelli.utils;
  * B64 encode a long. Useful for sort keys that are sorced from a long.
  */
 public class LongSortKey {
+    // ceil(64bits / 6bits) => 11
+    public static int LONG_SORT_KEY_LENGTH = 11;
     private static final char[] ALPHABET =
         "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         .toCharArray();
 
     public static String longToSortKey(long num) {
-        // ceil(64bits / 6bits) => 11
-        char[] result = new char[11];
+        char[] result = new char[LONG_SORT_KEY_LENGTH];
 
         int pos = 0;
         for ( int shift=60; shift >= 0; shift -= 6 ) {
@@ -21,9 +22,10 @@ public class LongSortKey {
 
     public static Long sortKeyToLong(String sortKey) {
         if ( null == sortKey ) return null;
-        if ( sortKey.length() != 11 ) {
+        if ( sortKey.length() != LONG_SORT_KEY_LENGTH ) {
             throw new IllegalArgumentException(
-                "Invalid longSortKey, must be string of length 11, got length="+sortKey.length());
+                "Invalid longSortKey, must be string of length "+
+                LONG_SORT_KEY_LENGTH+", got length="+sortKey.length());
         }
         char[] chrs = sortKey.toCharArray();
         long result = 0;

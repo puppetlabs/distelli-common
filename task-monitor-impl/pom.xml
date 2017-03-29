@@ -1,12 +1,12 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.distelli.webserver</groupId>
-  <artifactId>distelli-webserver</artifactId>
+  <groupId>com.distelli.monitor</groupId>
+  <artifactId>task-monitor-impl</artifactId>
   <version>9.0.2-SNAPSHOT</version>
   <packaging>jar</packaging>
 
-  <name>distelli-webserver</name>
+  <name>task-monitor-impl</name>
 
   <parent>
     <groupId>com.distelli.common</groupId>
@@ -16,10 +16,6 @@
 
   <build>
     <plugins>
-      <plugin>
-        <groupId>org.projectlombok</groupId>
-        <artifactId>lombok-maven-plugin</artifactId>
-      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
@@ -44,6 +40,7 @@
   </build>
 
   <dependencies>
+
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
@@ -52,33 +49,9 @@
     </dependency>
 
     <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-servlet</artifactId>
-      <version>9.2.6.v20141205</version>
-    </dependency>
-
-    <dependency>
-      <groupId>com.fasterxml.jackson.core</groupId>
-      <artifactId>jackson-databind</artifactId>
-      <version>2.5.1</version>
-    </dependency>
-
-    <dependency>
-      <groupId>com.fasterxml.jackson.module</groupId>
-      <artifactId>jackson-module-mrbean</artifactId>
-      <version>2.4.0</version>
-    </dependency>
-
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-api</artifactId>
-      <version>1.7.22</version>
-    </dependency>
-
-    <dependency>
-      <groupId>com.google.inject</groupId>
-      <artifactId>guice</artifactId>
-      <version>${guice.version}</version>
+      <groupId>com.distelli.monitor</groupId>
+      <artifactId>task-monitor-api</artifactId>
+      <version>9.0.2-SNAPSHOT</version>
     </dependency>
 
     <dependency>
@@ -88,16 +61,54 @@
     </dependency>
 
     <dependency>
+      <groupId>com.distelli.persistence</groupId>
+      <artifactId>persistence-impl</artifactId>
+      <version>${persistence.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.distelli.persistence</groupId>
+      <artifactId>persistence-api</artifactId>
+      <version>${persistence.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.distelli.persistence</groupId>
+      <artifactId>jackson-transform</artifactId>
+      <version>${persistence.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.distelli.persistence</groupId>
+      <artifactId>crypto-impl</artifactId>
+      <version>${persistence.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.5.1</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-log4j12</artifactId>
+      <version>1.7.22</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
       <groupId>com.google.inject.extensions</groupId>
-      <artifactId>guice-assistedinject</artifactId>
+      <artifactId>guice-multibindings</artifactId>
       <version>${guice.version}</version>
     </dependency>
 
     <dependency>
-      <groupId>org.msgpack</groupId>
-      <artifactId>jackson-dataformat-msgpack</artifactId>
-      <version>0.8.7</version>
+      <groupId>com.google.inject.extensions</groupId>
+      <artifactId>guice-assistedinject</artifactId>
+      <version>${guice.version}</version>
     </dependency>
-
   </dependencies>
 </project>

@@ -21,7 +21,9 @@
   </developers>
   <modules>
     <module>object-store-api</module>
+    <module>task-monitor-api</module>
     <module>object-store-impl</module>
+    <module>task-monitor-impl</module>
     <module>distelli-webserver</module>
     <module>utils</module>
     <module>guice-runner</module>
@@ -33,7 +35,7 @@
   <properties>
     <aws-java-sdk.version>1.11.30</aws-java-sdk.version>
     <guice.version>4.1.0</guice.version>
-    <persistence.version>1.3.0</persistence.version>
+    <persistence.version>3.2.3-SNAPSHOT</persistence.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
   <distributionManagement>
