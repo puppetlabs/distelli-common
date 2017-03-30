@@ -15,4 +15,5 @@ package com.distelli.monitor;
  */
 public interface Monitor {
     public void monitor(Monitored task);
+    public boolean isActiveMonitor(MonitorInfo monitorInfo);
 }

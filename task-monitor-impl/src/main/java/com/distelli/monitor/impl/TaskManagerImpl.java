@@ -1,6 +1,7 @@
 package com.distelli.monitor.impl;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import com.distelli.monitor.Monitor;
 import com.distelli.monitor.MonitorInfo;
 import com.distelli.monitor.TaskManager;
@@ -39,6 +40,7 @@ import java.io.PrintWriter;
 import javax.inject.Inject;
 import com.distelli.monitor.Sequence;
 import com.fasterxml.jackson.core.type.TypeReference;
+import javax.inject.Singleton;
 
 /**
  * If we loose DB connection or the JVM is `kill -9`ed, then tasks in these states will
@@ -50,7 +52,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
  *  WAITING_FOR_INTERVAL: releaseLocksForMonitorId() when broken monitor is found.
  *  WAITING_FOR_LOCK: releaseLocks(lockId)
  */
-
+@Singleton
 public class TaskManagerImpl implements TaskManager {
     private static final int POLL_INTERVAL_MS = 10000;
     private static final int MAX_TASKS_IN_INTERVAL = 100;
@@ -506,7 +508,7 @@ public class TaskManagerImpl implements TaskManager {
         try {
             _monitor.monitor((monitorInfo) -> lockAndRunTask(taskId, monitorInfo));
         } catch ( Throwable ex ) {
-            LOG.error("runTask -> "+taskId+" failed: "+ex.getMessage(), ex);
+            LOG.error("runTask("+taskId+") FAILED: "+ex.getMessage(), ex);
         }
     }
 
@@ -524,44 +526,36 @@ public class TaskManagerImpl implements TaskManager {
         return taskState;
     }
 
-    private boolean satisfiesPrerequisites(Task task) {
+    private boolean acquireLocksAndPrerequisites(Task task, List<String> locksAcquired, MonitorInfo monitorInfo, AtomicReference<TaskState> finalTaskState) {
+        Map<String, Long> lockIdToTaskId = new HashMap<>();
+        List<String> lockIds = new ArrayList<>(task.getLockIds());
+        lockIds.add(getLockForTaskId(task.getTaskId()));
         for ( Long prerequisiteId : task.getPrerequisiteTaskIds() ) {
             if ( null == prerequisiteId ) continue;
             String lockId = getLockForTaskId(prerequisiteId);
-            Task prerequisite = _tasks.getItem(prerequisiteId);
-            if ( getTaskState(prerequisite).isTerminal() ) {
-                continue;
-            }
-
-            // Enqueue:
-            _locks.putItem(new Lock(lockId, longToSortKey(task.getTaskId())));
-
-            // Double check the task is still non-terminal:
-            prerequisite = _tasks.getItem(prerequisiteId);
-
-            if ( getTaskState(prerequisite).isTerminal() ) {
-                _locks.deleteItem(lockId, longToSortKey(task.getTaskId()));
-                continue;
-            }
-            LOG.debug("TaskId="+task.getTaskId()+" waiting for "+prerequisiteId);
-            return false;
+            lockIds.add(lockId);
+            lockIdToTaskId.put(lockId, prerequisiteId);
         }
-        return true;
-    }
-        
-    private boolean acquireLocks(Task task, List<String> locksAcquired, MonitorInfo monitorInfo) {
-        List<String> lockIds = new ArrayList<>(task.getLockIds());
-        lockIds.add(getLockForTaskId(task.getTaskId()));
         Collections.sort(lockIds);
         for ( String lockId : lockIds ) {
             // Enqueue:
             _locks.putItem(new Lock(lockId, longToSortKey(task.getTaskId())));
+
+            Long prerequisiteId = lockIdToTaskId.get(lockId);
+            if ( null != prerequisiteId ) {
+                if ( ! getTaskState(_tasks.getItem(prerequisiteId)).isTerminal() ) {
+                    LOG.debug("Waiting on prerequisiteTaskId="+prerequisiteId+" for taskId="+task.getTaskId());
+                    finalTaskState.set(TaskState.WAITING_FOR_PREREQUISITE);
+                    return false;
+                }
+            }
 
             // Try to acquire:
             try {
                 Lock lock = _locks.updateItem(lockId, TASK_ID_NONE)
                     .set("mid", monitorInfo.getMonitorId())
                     .set("rtid", task.getTaskId())
+                    .increment("agn", 1)
                     .returnAllNew()
                     .when((expr) -> expr.not(expr.exists("mid")));
                 locksAcquired.add(lockId);
@@ -573,6 +567,7 @@ public class TaskManagerImpl implements TaskManager {
                     .increment("agn", 1)
                     .always();
 
+                finalTaskState.set(TaskState.WAITING_FOR_LOCK);
                 return false;
             }
         }
@@ -642,13 +637,7 @@ public class TaskManagerImpl implements TaskManager {
                 return;
             }
 
-            if ( ! satisfiesPrerequisites(task) ) {
-                finalTaskState.set(TaskState.WAITING_FOR_PREREQUISITE);
-                return;
-            }
-
-            if ( ! acquireLocks(task, locksAcquired, monitorInfo) ) {
-                finalTaskState.set(TaskState.WAITING_FOR_LOCK);
+            if ( ! acquireLocksAndPrerequisites(task, locksAcquired, monitorInfo, finalTaskState) ) {
                 return;
             }
 
@@ -681,7 +670,8 @@ public class TaskManagerImpl implements TaskManager {
             redispatch = updateTaskStateTerminal(task, monitorInfo, taskInfo, err);
             finalTaskState.set(null);
         } catch ( LostLockException ex ) {
-            LOG.error("FORCING HEARTBEAT FAILURE: "+ex.getMessage(), ex);
+            LOG.error("Failing heartbeat "+monitorInfo.getMonitorId()+" due to taskId="+
+                      taskId+": "+ex.getMessage(), ex);
             monitorInfo.forceHeartbeatFailure();
         } finally {
             if ( null != threadName ) {
@@ -694,7 +684,9 @@ public class TaskManagerImpl implements TaskManager {
             try {
                 interrupted |= updateTaskState(taskId, locksAcquired, finalTaskState.get(), monitorInfo, redispatch);
             } catch ( Throwable ex ) {
-                LOG.error("FORCING HEARTBEAT FAILURE: due to taskId="+taskId+": "+ex.getMessage(), ex);
+                LOG.error("Failing heartbeat "+monitorInfo.getMonitorId()+
+                          " in updateTaskState due to taskId="+taskId+": "+
+                          ex.getMessage(), ex);
                 monitorInfo.forceHeartbeatFailure();
             }
             if ( interrupted || monitorInfo.hasFailedHeartbeat() ) {
@@ -804,9 +796,9 @@ public class TaskManagerImpl implements TaskManager {
                 if ( redispatch ) _executor.submit(() -> runTask(taskId));
                 return interrupted;
             } catch ( RuntimeException ex ) {
-                if ( Thread.interrupted() ) {
+                if ( Thread.interrupted() || isInterruptedException(ex) ) {
                     interrupted = true;
-                    LOG.info("Interrupted in attempt to updateTaskState("+taskId+"): "+ex.getMessage(), ex);
+                    LOG.debug("Interrupted in attempt to updateTaskState("+taskId+"): "+ex.getMessage(), ex);
                     continue;
                 }
                 throw ex;
@@ -815,6 +807,14 @@ public class TaskManagerImpl implements TaskManager {
         monitorInfo.forceHeartbeatFailure();
         LOG.error("Interrupted to many times, giving up on updateTaskState("+taskId+"), failing the monitor!");
         return interrupted;
+    }
+
+    private boolean isInterruptedException(Exception ex) {
+        switch ( ex.getClass().getName() ) {
+        case "com.amazonaws.AbortedException":
+            return true;
+        }
+        return false;
     }
 
     private void releaseLocks(List<String> locks, Long taskId, MonitorInfo monitorInfo) {
@@ -840,7 +840,7 @@ public class TaskManagerImpl implements TaskManager {
                 throw new LostLockException(taskId);
             }
             locks.remove(locks.size()-1);
-            if ( monitorInfo.hasFailedHeartbeat() ) continue;
+            if ( null == nextTaskId || ! _monitor.isActiveMonitor(monitorInfo) ) continue;
             _executor.submit(() -> runTask(nextTaskId));
         }
     }

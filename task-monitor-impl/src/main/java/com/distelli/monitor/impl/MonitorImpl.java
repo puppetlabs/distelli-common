@@ -2,6 +2,7 @@ package com.distelli.monitor.impl;
 
 import com.distelli.monitor.Monitored;
 import com.distelli.monitor.Monitor;
+import com.distelli.monitor.MonitorInfo;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -25,7 +26,9 @@ import javax.inject.Inject;
 import javax.persistence.RollbackException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.NoSuchElementException;
+import javax.inject.Singleton;
 
+@Singleton
 public class MonitorImpl implements Monitor {
     private static final Logger LOG = LoggerFactory.getLogger(MonitorImpl.class);
     private static final int HEARTBEAT_INTERVAL_MS = 10000;
@@ -42,10 +45,17 @@ public class MonitorImpl implements Monitor {
 
     private Index<MonitorInfoImpl> _monitors;
     private final ObjectMapper _om = new ObjectMapper();
+
+    // synchronize(_heartbeats):
     private Map<String, Long> _heartbeats = new HashMap<>();
+
+    // synchronize(this):
     private MonitorInfoImpl _activeMonitorInfo;
+    // synchronize(this):
     private ScheduledFuture<?> _reaper;
+    // synchronize(this):
     private ScheduledFuture<?> _heartbeat;
+    // synchronize(this):
     private Set<MonitorInfoImpl> _monitorsToShutdown = new HashSet<>();
 
     public static TableDescription getTableDescription() {
@@ -103,88 +113,93 @@ public class MonitorImpl implements Monitor {
 
     @Override
     public void monitor(Monitored task) {
-        MonitorInfoImpl oldMonitor = null;
-        MonitorInfoImpl newMonitor;
+        MonitorInfoImpl monitor = null;
         synchronized ( this ) {
             if ( null == _reaper ) {
                 throw new ShuttingDownException();
             }
-            if ( null == _activeMonitorInfo || _activeMonitorInfo.hasFailedHeartbeat() ) {
-                oldMonitor = _activeMonitorInfo;
-                newMonitor = new MonitorInfoImpl(
-                    _productVersion.toString(),
-                    HEARTBEAT_INTERVAL_MS * REAP_INTERVALS);
-                _monitors.putItem(newMonitor);
-                _monitorsToShutdown.add(newMonitor);
-                _activeMonitorInfo = newMonitor;
-            } else {
-                newMonitor = _activeMonitorInfo;
+            monitor = _activeMonitorInfo;
+        }
+        if ( null == monitor || monitor.hasFailedHeartbeat() ) {
+            monitor = new MonitorInfoImpl(
+                _productVersion.toString(),
+                HEARTBEAT_INTERVAL_MS * REAP_INTERVALS);
+            MonitorInfoImpl shutdownMonitor = null;
+            synchronized ( this ) {
+                if ( null == _activeMonitorInfo || _activeMonitorInfo.hasFailedHeartbeat() ) {
+                    shutdownMonitor = _activeMonitorInfo;
+                    _monitorsToShutdown.add(monitor);
+                    _monitors.putItem(monitor);
+                    _activeMonitorInfo = monitor;
+                } else {
+                    monitor = _activeMonitorInfo;
+                }
+            }
+            if ( null != shutdownMonitor ) {
+                shutdown(shutdownMonitor);
             }
         }
-        if ( null != oldMonitor ) shutdown(oldMonitor);
         try {
-            newMonitor.getRunningThreads().add(Thread.currentThread());
-            task.run(newMonitor);
+            monitor.captureRunningThread();
+            task.run(monitor);
         } finally {
-            newMonitor.getRunningThreads().remove(Thread.currentThread());
-            if ( newMonitor.hasFailedHeartbeat() ) shutdown(newMonitor);
+            monitor.releaseRunningThread();
+            if ( monitor.hasFailedHeartbeat() ) shutdown(monitor);
         }
+    }
+
+    @Override
+    public synchronized boolean isActiveMonitor(MonitorInfo monitorInfo) {
+        return _activeMonitorInfo == monitorInfo;
     }
 
     private static long milliTime() {
         return TimeUnit.NANOSECONDS.convert(System.nanoTime(), TimeUnit.MILLISECONDS);
     }
 
-    private synchronized void shutdown() {
-        if ( null == _reaper ) return;
-        _activeMonitorInfo = null;
-        _reaper.cancel(false);
-        _heartbeat.cancel(false);
-        _reaper = null;
-        _heartbeat = null;
-        while ( ! _monitorsToShutdown.isEmpty() ) {
-            shutdown(_monitorsToShutdown.iterator().next());
+    private void shutdown() {
+        synchronized ( this ) {
+            if ( null == _reaper ) return;
+            _activeMonitorInfo = null;
+            _reaper.cancel(false);
+            _heartbeat.cancel(false);
+            _reaper = null;
+            _heartbeat = null;
+        }
+        while ( true ) {
+            MonitorInfoImpl monitor = null;
+            synchronized ( this ) {
+                if ( ! _monitorsToShutdown.isEmpty() ) {
+                    monitor = _monitorsToShutdown.iterator().next();
+                }
+            }
+            if ( null == monitor ) break;
+            shutdown(monitor);
         }
     }
 
-    private synchronized void shutdown(MonitorInfoImpl monitor) {
-        if ( _activeMonitorInfo == monitor ) {
-            // Make sure this is NOT the active monitor:
-            _activeMonitorInfo = null;
+    private void shutdown(MonitorInfoImpl monitor) {
+        synchronized ( this ) {
+            if ( _activeMonitorInfo == monitor ) {
+                // Make sure this is NOT the active monitor:
+                _activeMonitorInfo = null;
+            }
         }
 
-        // Interrupt all running threads:
-        for ( Thread thread : monitor.getRunningThreads() ) {
-            thread.interrupt();
-        }
-
-        while ( true ) {
-            Thread thread = null;
-            try {
-                thread = monitor.getRunningThreads()
-                    .iterator().next();
-            } catch ( NoSuchElementException ex ) {
-                break; // runningthreads is empty!
-            }
-            long waitTime = monitor.getLastHeartbeatMillis()
-                + ( HEARTBEAT_INTERVAL_MS * REAP_INTERVALS )
-                - milliTime();
-            if ( waitTime <= 0 ) {
-                LOG.error("Failed to halt threads, failing this monitor");
-                monitor.forceHeartbeatFailure();
-            }
-            try {
-                thread.join(waitTime);
-            } catch ( InterruptedException ex ) {
-                Thread.currentThread().interrupt();
-                continue;
-            }
+        long waitTime = monitor.getLastHeartbeatMillis()
+            + ( HEARTBEAT_INTERVAL_MS * REAP_INTERVALS )
+            - milliTime();
+        if ( ! monitor.interruptAndWaitForRunningThreads(waitTime) ) {
+            LOG.error("Failed to halt all threads, failing this monitor");
+            monitor.forceHeartbeatFailure();
         }
 
         if ( ! monitor.hasFailedHeartbeat() ) {
             _monitors.deleteItem(monitor.getMonitorId(), null);
         }
-        _monitorsToShutdown.remove(monitor);
+        synchronized ( this ) {
+            _monitorsToShutdown.remove(monitor);
+        }
     }
 
     private List<MonitorInfoImpl> listMonitors(PageIterator iter) {
@@ -219,7 +234,7 @@ public class MonitorImpl implements Monitor {
         }
     }
 
-    private synchronized void reap(MonitorInfoImpl monitor) {
+    private void reap(MonitorInfoImpl monitor) {
         // Add task to delete references:
         _taskManager.addTask(
             _reapMonitorTask.build(
@@ -227,15 +242,18 @@ public class MonitorImpl implements Monitor {
         _monitors.deleteItem(monitor.getMonitorId(), null);
     }
 
-    private synchronized void heartbeat() {
-        // We are already shutting down:
-        if ( null == _activeMonitorInfo || _activeMonitorInfo.hasFailedHeartbeat() ) return;
-
+    private void heartbeat() {
+        MonitorInfoImpl monitor = null;
         try {
-            _activeMonitorInfo.heartbeatWasPerformed();
-            _monitors.updateItem(_activeMonitorInfo.getMonitorId(), null)
+            synchronized ( this ) {
+                monitor = _activeMonitorInfo;
+            }
+            // We are already shutting down:
+            if ( null == monitor || monitor.hasFailedHeartbeat() ) return;
+            _monitors.updateItem(monitor.getMonitorId(), null)
                 .increment("hb", 1)
                 .when((expr) -> expr.exists("id"));
+            monitor.heartbeatWasPerformed();
             return;
         } catch ( Throwable ex ) {
             if ( ex instanceof RollbackException ) {
@@ -244,8 +262,10 @@ public class MonitorImpl implements Monitor {
             } else {
                 LOG.error(ex.getMessage(), ex);
             }
-            _activeMonitorInfo.forceHeartbeatFailure();
-            shutdown(_activeMonitorInfo);
+            if ( null != monitor ) {
+                monitor.forceHeartbeatFailure();
+                shutdown(monitor);
+            }
         }
     }
 }

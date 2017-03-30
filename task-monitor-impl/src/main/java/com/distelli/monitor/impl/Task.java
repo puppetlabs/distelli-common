@@ -6,7 +6,7 @@ import java.util.Arrays;
 import com.distelli.monitor.TaskState;
 import com.distelli.monitor.TaskInfo;
 import com.distelli.monitor.TaskBuilder;
-
+import static javax.xml.bind.DatatypeConverter.printBase64Binary;
 public class Task implements TaskInfo {
     public Long taskId;
     public String entityType;
@@ -114,5 +114,26 @@ public class Task implements TaskInfo {
 
     public TaskBuilder toBuilder() {
         return new TaskBuilderImpl(new Task(this));
+    }
+
+    public String toString() {
+        return "TaskInfo:{"
+            +"taskId="+taskId
+            +",entityType="+entityType
+            +",entityId="+entityId
+            +",taskState="+taskState
+            +",lockIds="+lockIds
+            +",prerequisiteTaskIds="+prerequisiteTaskIds
+            +",monitorId="+monitorId
+            +",checkpointData="+printBase64Binary(null == checkpointData ? new byte[0] : checkpointData)
+            +",errorMessage=="+errorMessage
+            +",errorId="+errorId
+            +",errorMessageStackTrace="+errorMessageStackTrace
+            +",startTime="+startTime
+            +",endTime="+endTime
+            +",runCount="+runCount
+            +",millisecondsRemaining="+millisecondsRemaining
+            +",canceledBy="+canceledBy
+            +"}";
     }
 }

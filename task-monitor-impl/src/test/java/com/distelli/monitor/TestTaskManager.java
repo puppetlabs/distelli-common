@@ -13,6 +13,7 @@ import com.google.inject.multibindings.Multibinder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
@@ -86,10 +87,7 @@ public class TestTaskManager {
         private TaskManager _taskManager;
 
         public CountDownLatch _latch = null;
-
-        public void setCountDownLatch(CountDownLatch latch) {
-            _latch = latch;
-        }
+        public List<Long> _tasksRan = null;
 
         @Override
         public TaskInfo run(TaskContext ctx) throws Exception {
@@ -98,17 +96,18 @@ public class TestTaskManager {
         }
 
         public TaskInfo testPrerequisite(TaskContext ctx) throws Exception {
-            _latch.countDown();
-            Set<Long> prerequisisteTaskIds = ctx.getTaskInfo().getPrerequisiteTaskIds();
-            Long taskId = ( prerequisisteTaskIds.isEmpty() ) ? null : prerequisisteTaskIds.iterator().next();
-            if ( null == taskId ) {
-                // TODO: validate this automatically...
-                System.err.println("no prerequisite taskId, should be only one...");
-            } else {
-                assertEquals(_taskManager.getTask(taskId)
-                             .getTaskState(), TaskState.SUCCESS);
+            try {
+                Set<Long> prerequisisteTaskIds = ctx.getTaskInfo().getPrerequisiteTaskIds();
+                Long taskId = ( prerequisisteTaskIds.isEmpty() ) ? null : prerequisisteTaskIds.iterator().next();
+                if ( null != taskId ) {
+                    assertEquals(_taskManager.getTask(taskId)
+                                 .getTaskState(), TaskState.SUCCESS);
+                }
+                _tasksRan.add(ctx.getTaskInfo().getTaskId());
+                return null;
+            } finally {
+                _latch.countDown();
             }
-            return null;
         }
     }
 
@@ -116,6 +115,8 @@ public class TestTaskManager {
     private TaskManager _taskManager;
     @Inject
     private TestTask _testTask;
+    @Inject
+    private ScheduledExecutorService _executor;
 
     @Before
     public void beforeTest() {
@@ -128,7 +129,8 @@ public class TestTaskManager {
         _taskManager.monitorTaskQueue();
         TaskInfo lastTask = null;
         CountDownLatch latch = new CountDownLatch(taskCount);
-        _testTask.setCountDownLatch(latch);
+        _testTask._latch = latch;
+        _testTask._tasksRan = new ArrayList<>();
         List<Long> taskIds = new ArrayList<>();
         for ( int i=0; i < taskCount; i++ ) {
             lastTask = _taskManager.createTask()
@@ -140,6 +142,9 @@ public class TestTaskManager {
             taskIds.add(lastTask.getTaskId());
         }
         latch.await();
+        _executor.shutdown();
+        _executor.awaitTermination(60, TimeUnit.SECONDS);
+        assertEquals(_testTask._tasksRan, taskIds);
         for ( Long taskId : taskIds ) {
             TaskInfo task = _taskManager.getTask(taskId);
             assertEquals(task.getTaskState(), TaskState.SUCCESS);
