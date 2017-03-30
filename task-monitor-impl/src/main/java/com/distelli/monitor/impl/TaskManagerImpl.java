@@ -22,8 +22,11 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,7 +81,15 @@ public class TaskManagerImpl implements TaskManager {
     private final ObjectMapper _om = new ObjectMapper();
     private final Map<Long, DelayedTask> _delayedTasks =
         new ConcurrentHashMap<>();
+
+    private AtomicInteger _spawnedCount = new AtomicInteger(0);
+
+    // synchronized(this):
     private ScheduledFuture<?> _monitorTasks;
+    // synchronized(this):
+    private Set<Future<?>> _spawnedFutures = new HashSet<>();
+    // synchronized(this):
+    private boolean _hasShutdownHook = false;
 
     private static class DelayedTask {
         private DelayedTask(long millisRemaining) {
@@ -92,7 +103,7 @@ public class TaskManagerImpl implements TaskManager {
     public static class TasksTable {
         public static TableDescription getTableDescription() {
             return TableDescription.builder()
-                .tableName("tasks")
+                .tableName("monitor-tasks")
                 // Query on task id:
                 .index((idx) -> idx
                        .hashKey("id", AttrType.NUM))
@@ -116,7 +127,7 @@ public class TaskManagerImpl implements TaskManager {
         // on a lock.
         public static TableDescription getTableDescription() {
             return TableDescription.builder()
-                .tableName("locks")
+                .tableName("monitor-locks")
                 .index((idx) -> idx
                        .hashKey("lid", AttrType.STR)
                        // "actual" locks have tid=TASK_ID_NONE:
@@ -189,14 +200,7 @@ public class TaskManagerImpl implements TaskManager {
         // Save the task:
         _tasks.putItemOrThrow(task);
         // Dispatch:
-        long taskId = task.getTaskId();
-        synchronized ( this ) {
-            if ( null != _monitorTasks ) {
-                _executor.submit(() -> runTask(taskId));
-            } else {
-                LOG.debug("monitorTaskQueue() not called");
-            }
-        }
+        submitRunTask(task.getTaskId());
     }
 
     // Marks a task as "to be canceled":
@@ -218,11 +222,7 @@ public class TaskManagerImpl implements TaskManager {
             return;
         }
         // We moved the task out of waiting, so let's execute it:
-        synchronized ( this ) {
-            if ( null != _monitorTasks ) {
-                _executor.submit(() -> runTask(taskId));
-            }
-        }
+        submitRunTask(taskId);
     }
 
     @Override
@@ -234,25 +234,50 @@ public class TaskManagerImpl implements TaskManager {
             POLL_INTERVAL_MS,
             TimeUnit.MILLISECONDS);
         TaskManagerImpl taskManager = this;
+        if ( _hasShutdownHook ) return;
         Runtime.getRuntime().addShutdownHook(new Thread() {
                 @Override
                 public void run() {
                     try {
-                        synchronized ( taskManager ) {
-                            _monitorTasks.cancel(false);
-                            _monitorTasks = null;
-                            for ( Long taskId : _delayedTasks.keySet() ) {
-                                updateDelayedTask(taskId, null);
-                            }
-                        }
+                        stopTaskQueueMonitor(true);
                     } catch ( Throwable ex ) {
                         LOG.error(ex.getMessage(), ex);
                     }
                 }
             });
+        _hasShutdownHook = true;
     }
 
+    @Override
+    public void stopTaskQueueMonitor(boolean mayInterruptIfRunning) {
+        synchronized ( this ) {
+            if ( null == _monitorTasks ) return;
+            _monitorTasks.cancel(false);
+            _monitorTasks = null;
+        }
+        for ( Long taskId : _delayedTasks.keySet() ) {
+            updateDelayedTask(taskId, null);
+        }
+        synchronized ( this ) {
+            if ( null != _monitorTasks ) return;
+            for ( Future<?> future : _spawnedFutures ) {
+                future.cancel(mayInterruptIfRunning);
+            }
+            _spawnedFutures.clear();
+            while ( null == _monitorTasks && _spawnedCount.get() > 0 ) {
+                try {
+                    wait();
+                } catch ( InterruptedException ex ) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
+
     public void releaseLocksForMonitorId(String monitorId) {
+        LOG.debug("Releasing locks for monitorId="+monitorId);
         // Release locks on the "locks" table:
         for ( PageIterator iter : new PageIterator() ) {
             for ( Lock lock : _locksForMonitor.queryItems(monitorId, iter).list() ) {
@@ -276,11 +301,7 @@ public class TaskManagerImpl implements TaskManager {
                               lock.lockId+" runningTaskId="+lock.runningTaskId);
                     continue;
                 }
-                synchronized ( this ) {
-                    if ( null != _monitorTasks ) {
-                        _executor.submit(() -> runTask(nextTaskId));
-                    }
-                }
+                if ( null != nextTaskId ) submitRunTask(nextTaskId);
             }
         }
         // Release locks on individual "tasks":
@@ -295,11 +316,7 @@ public class TaskManagerImpl implements TaskManager {
                               task.getTaskId());
                     continue;
                 }
-                synchronized ( this ) {
-                    if ( null != _monitorTasks ) {
-                        _executor.submit(() -> runTask(task.getTaskId()));
-                    }
-                }
+                submitRunTask(task.getTaskId());
             }
         }
     }
@@ -308,7 +325,7 @@ public class TaskManagerImpl implements TaskManager {
     protected TaskManagerImpl(Index.Factory indexFactory) {
         _om.registerModule(createTransforms(new TransformModule()));
 
-        String[] noEncrypt = new String[]{"cnt"};
+        String[] noEncrypt = new String[]{"cnt", "tic"};
         _tasks = indexFactory.create(Task.class)
             .withTableDescription(TasksTable.getTableDescription())
             .withConvertValue(_om::convertValue)
@@ -427,7 +444,86 @@ public class TaskManagerImpl implements TaskManager {
     }
 
     private static long milliTime() {
-        return TimeUnit.NANOSECONDS.convert(System.nanoTime(), TimeUnit.MILLISECONDS);
+        return TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
+    }
+
+    private synchronized void submitRunTask(long taskId) {
+        if ( null == _monitorTasks ) return;
+        AtomicReference<Future<?>> futureRef = new AtomicReference<>();
+        futureRef.set(
+            _executor.submit(
+                () -> {
+                    try {
+                        try {
+                            _spawnedCount.incrementAndGet();
+                            runTask(taskId);
+                        } finally {
+                            synchronized ( this ) {
+                                _spawnedFutures.remove(futureRef.get());
+                                if ( _spawnedCount.decrementAndGet() <= 0 ) {
+                                    notifyAll();
+                                }
+                            }
+                        }
+                    } catch ( Throwable ex ) {
+                        LOG.error("runTask("+taskId+"): "+ex.getMessage(), ex);
+                    }
+                }));
+        _spawnedFutures.add(futureRef.get());
+    }
+
+    private synchronized void scheduleRunTask(long taskId, long interval) {
+        if ( null == _monitorTasks ) return;
+        AtomicReference<Future<?>> futureRef = new AtomicReference<>();
+        futureRef.set(
+            _executor.schedule(
+                () -> {
+                    try {
+                        try {
+                            _spawnedCount.incrementAndGet();
+                            runTask(taskId);
+                        } finally {
+                            synchronized ( this ) {
+                                _spawnedFutures.remove(futureRef.get());
+                                if ( _spawnedCount.decrementAndGet() <= 0 ) {
+                                    notifyAll();
+                                }
+                            }
+                        }
+                    } catch ( Throwable ex ) {
+                        LOG.error("runTask("+taskId+"): "+ex.getMessage(), ex);
+                    }
+                },
+                interval,
+                TimeUnit.MILLISECONDS));
+        _spawnedFutures.add(futureRef.get());
+    }
+
+    private synchronized void scheduleDelayedTask(long taskId, long interval) {
+        if ( null == _monitorTasks ) return;
+        AtomicReference<Future<?>> futureRef = new AtomicReference<>();
+        futureRef.set(
+            _executor.schedule(
+                () -> {
+                    try {
+                        try {
+                            _spawnedCount.incrementAndGet();
+                            _monitor.monitor((monitorInfo) -> updateDelayedTask(taskId, monitorInfo));
+                        } finally {
+                            synchronized ( this ) {
+                                _spawnedFutures.remove(futureRef.get());
+                                if ( _spawnedCount.decrementAndGet() <= 0 ) {
+                                    notifyAll();
+                                }
+                            }
+                        }
+                    } catch ( Throwable ex ) {
+                        LOG.error("updateDelayedTask("+taskId+"): "+ex.getMessage(), ex);
+                    }
+                },
+                interval,
+                TimeUnit.MILLISECONDS));
+        _spawnedFutures.add(futureRef.get());
     }
 
     private void monitorDelayedTask(Task task) {
@@ -440,29 +536,28 @@ public class TaskManagerImpl implements TaskManager {
             }
             long interval = Math.min(POLL_INTERVAL_MS, delayedTask.millisRemaining)
                 - (milliTime() - delayedTask.millisTimeBegin);
-            _executor.schedule(
-                () -> _monitor.monitor((monitorInfo) -> updateDelayedTask(taskId, monitorInfo)),
-                interval,
-                TimeUnit.MILLISECONDS);
+            scheduleDelayedTask(taskId, interval);
             LOG.debug("Monitoring delayed taskId="+taskId);
         }
     }
 
     private void startRunnableTasks() {
-        List<Task> tasks = _tasksForMonitor
-            .queryItems(MONITOR_ID_QUEUED, new PageIterator().pageSize(MAX_TASKS_IN_INTERVAL))
-            .list(Arrays.asList("id"));
-        // Randomly distribute queued tasks:
-        for ( Task task : tasks ) {
-            _executor.schedule(
-                () -> runTask(task.getTaskId()),
-                ThreadLocalRandom.current().nextLong(POLL_INTERVAL_MS),
-                TimeUnit.MILLISECONDS);
-        }
-        // TODO: Occassionally find all MONITOR_ID_WAITING tasks to check if
-        // cleanup needs to happen?
+        try {
+            List<Task> tasks = _tasksForMonitor
+                .queryItems(MONITOR_ID_QUEUED, new PageIterator().pageSize(MAX_TASKS_IN_INTERVAL))
+                .list(Arrays.asList("id"));
+            // Randomly distribute queued tasks:
+            for ( Task task : tasks ) {
+                long interval = ThreadLocalRandom.current().nextLong(POLL_INTERVAL_MS);
+                scheduleRunTask(task.getTaskId(), interval);
+            }
+            // TODO: Occassionally find all MONITOR_ID_WAITING tasks to check if
+            // cleanup needs to happen?
 
-        // TODO: Poll for canceled tasks that we are running...
+            // TODO: Poll for canceled tasks that we are running and interrupt them...
+        } catch ( Throwable ex ) {
+            LOG.error(ex.getMessage(), ex);
+        }
     }
 
     private void updateDelayedTask(final long taskId, MonitorInfo monitorInfo) {
@@ -472,7 +567,7 @@ public class TaskManagerImpl implements TaskManager {
             UpdateItemBuilder update = _tasks.updateItem(taskId, null);
             long now = milliTime();
             long newRemaining = delayedTask.millisRemaining - (now - delayedTask.millisTimeBegin);
-            if ( newRemaining <= 0 ) {
+            if ( newRemaining <= 0 || null == monitorInfo ) {
                 update.remove("tic")
                     .set("mid", MONITOR_ID_QUEUED)
                     .set("stat", toString(TaskState.QUEUED));
@@ -488,19 +583,14 @@ public class TaskManagerImpl implements TaskManager {
             }
             if ( newRemaining <= 0 || null == monitorInfo ) { // stop monitoring:
                 _delayedTasks.remove(taskId, delayedTask);
-                if ( null != monitorInfo ) {
-                    _executor.submit(() -> runTask(taskId));
-                }
+                submitRunTask(taskId);
                 return;
             }
             delayedTask.millisRemaining = newRemaining;
             delayedTask.millisTimeBegin = now;
             long interval = Math.min(POLL_INTERVAL_MS, delayedTask.millisRemaining)
                 - (milliTime() - now);
-            _executor.schedule(
-                () -> _monitor.monitor((monInfo) -> updateDelayedTask(taskId, monInfo)),
-                interval,
-                TimeUnit.MILLISECONDS);
+            scheduleDelayedTask(taskId, interval);
         }
     }
 
@@ -742,6 +832,7 @@ public class TaskManagerImpl implements TaskManager {
                 state = TaskState.QUEUED;
                 update.set("tic", taskInfo.getMillisecondsRemaining());
             }
+            LOG.debug("taskId="+task.getTaskId()+" state="+state);
         }
         String monitorId = monitorIdForState(state);
         if ( null == monitorId ) {
@@ -793,7 +884,7 @@ public class TaskManagerImpl implements TaskManager {
                         throw new LostLockException(taskId);
                     }
                 }
-                if ( redispatch ) _executor.submit(() -> runTask(taskId));
+                if ( redispatch ) submitRunTask(taskId);
                 return interrupted;
             } catch ( RuntimeException ex ) {
                 if ( Thread.interrupted() || isInterruptedException(ex) ) {
@@ -841,7 +932,7 @@ public class TaskManagerImpl implements TaskManager {
             }
             locks.remove(locks.size()-1);
             if ( null == nextTaskId || ! _monitor.isActiveMonitor(monitorInfo) ) continue;
-            _executor.submit(() -> runTask(nextTaskId));
+            submitRunTask(nextTaskId);
         }
     }
 

@@ -91,23 +91,32 @@ public class TestTaskManager {
 
         @Override
         public TaskInfo run(TaskContext ctx) throws Exception {
-            String methodName = ctx.getTaskInfo().getEntityId();
-            return (TaskInfo)getClass().getMethod(methodName, TaskContext.class).invoke(this, ctx);
-        }
-
-        public TaskInfo testPrerequisite(TaskContext ctx) throws Exception {
             try {
-                Set<Long> prerequisisteTaskIds = ctx.getTaskInfo().getPrerequisiteTaskIds();
-                Long taskId = ( prerequisisteTaskIds.isEmpty() ) ? null : prerequisisteTaskIds.iterator().next();
-                if ( null != taskId ) {
-                    assertEquals(_taskManager.getTask(taskId)
-                                 .getTaskState(), TaskState.SUCCESS);
-                }
-                _tasksRan.add(ctx.getTaskInfo().getTaskId());
-                return null;
+                String methodName = ctx.getTaskInfo().getEntityId();
+                return (TaskInfo)getClass().getMethod(methodName, TaskContext.class).invoke(this, ctx);
             } finally {
                 _latch.countDown();
             }
+        }
+
+        public TaskInfo testPrerequisite(TaskContext ctx) throws Exception {
+            Set<Long> prerequisisteTaskIds = ctx.getTaskInfo().getPrerequisiteTaskIds();
+            Long taskId = ( prerequisisteTaskIds.isEmpty() ) ? null : prerequisisteTaskIds.iterator().next();
+            if ( null != taskId ) {
+                assertEquals(_taskManager.getTask(taskId)
+                             .getTaskState(), TaskState.SUCCESS);
+            }
+            _tasksRan.add(ctx.getTaskInfo().getTaskId());
+            return null;
+        }
+
+        public TaskInfo testDelayed(TaskContext ctx) throws Exception {
+            int remaining = Integer.parseInt(new String(ctx.getTaskInfo().getCheckpointData()));
+            if ( --remaining <= 0 ) return null;
+            return ctx.getTaskInfo().toBuilder()
+                .millisecondsRemaining(200)
+                .checkpointData((""+remaining).getBytes())
+                .build();
         }
     }
 
@@ -115,8 +124,6 @@ public class TestTaskManager {
     private TaskManager _taskManager;
     @Inject
     private TestTask _testTask;
-    @Inject
-    private ScheduledExecutorService _executor;
 
     @Before
     public void beforeTest() {
@@ -142,12 +149,40 @@ public class TestTaskManager {
             taskIds.add(lastTask.getTaskId());
         }
         latch.await();
-        _executor.shutdown();
-        _executor.awaitTermination(60, TimeUnit.SECONDS);
+        _taskManager.stopTaskQueueMonitor(false);
         assertEquals(_testTask._tasksRan, taskIds);
         for ( Long taskId : taskIds ) {
             TaskInfo task = _taskManager.getTask(taskId);
             assertEquals(task.getTaskState(), TaskState.SUCCESS);
         }
+    }
+
+    private static long milliTime() {
+        return TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
+    }
+
+    @Test
+    public void testDelayed() throws Exception {
+        final int delayCount = 5;
+        _taskManager.monitorTaskQueue();
+
+        CountDownLatch latch = new CountDownLatch(delayCount);
+        _testTask._latch = latch;
+
+        TaskInfo task = _taskManager.createTask()
+            .entityType(TestTask.ENTITY_TYPE)
+            .entityId("testDelayed")
+            .checkpointData((""+delayCount).getBytes())
+            .build();
+
+        long t0 = milliTime();
+        _taskManager.addTask(task);
+
+        latch.await();
+        _taskManager.stopTaskQueueMonitor(false);
+
+        long duration = milliTime() - t0;
+        assertTrue("duration = "+duration, duration >= 1000);
+        assertEquals(_taskManager.getTask(task.getTaskId()).getTaskState(), TaskState.SUCCESS);
     }
 }

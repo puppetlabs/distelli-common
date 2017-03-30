@@ -8,8 +8,11 @@ import java.util.Collections;
 import java.lang.management.ManagementFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class MonitorInfoImpl implements MonitorInfo {
+    private static final Logger LOG = LoggerFactory.getLogger(MonitorInfoImpl.class);
     // Persisted:
     private String monitorId;
     private String nodeName;
@@ -22,6 +25,7 @@ public class MonitorInfoImpl implements MonitorInfo {
     private long lastHeartbeatMillis;
     private long maxTimeBetweenHeartbeat;
 
+    public MonitorInfoImpl() {}
     public MonitorInfoImpl(String version, long maxTimeBetweenHeartbeat) {
         this.monitorId = CompactUUID.randomUUID().toString();
         this.hasFailedHeartbeat = false;
@@ -29,6 +33,7 @@ public class MonitorInfoImpl implements MonitorInfo {
         this.version = version;
         this.heartbeat = 1;
         this.lastHeartbeatMillis = milliTime();
+        this.maxTimeBetweenHeartbeat = maxTimeBetweenHeartbeat;
     }
 
     @Override
@@ -38,7 +43,8 @@ public class MonitorInfoImpl implements MonitorInfo {
 
     @Override
     public synchronized boolean hasFailedHeartbeat() {
-        if ( milliTime() - lastHeartbeatMillis > maxTimeBetweenHeartbeat ) {
+        if ( ! hasFailedHeartbeat && milliTime() - lastHeartbeatMillis > maxTimeBetweenHeartbeat ) {
+            LOG.error("Forcing heartbeat failure due to max time between heartbeat");
             hasFailedHeartbeat = true;
         }
         return hasFailedHeartbeat;
@@ -94,7 +100,7 @@ public class MonitorInfoImpl implements MonitorInfo {
     }
 
     private static long milliTime() {
-        return TimeUnit.NANOSECONDS.convert(System.nanoTime(), TimeUnit.MILLISECONDS);
+        return TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
     }
 
     // Returns true if all threads got shutdown in the millisWaitMax time.
@@ -118,5 +124,18 @@ public class MonitorInfoImpl implements MonitorInfo {
             }
         }
         return true;
+    }
+
+    @Override
+    public String toString() {
+        return "MonitorInfo{"
+            +"monitorId="+monitorId
+            +",nodeName="+nodeName
+            +",heartbeat="+heartbeat
+            +",hasFailedHeartbeat="+hasFailedHeartbeat
+            +",lastHeartbeatMillis="+lastHeartbeatMillis
+            +",maxTimeBetweenHeartbeat="+maxTimeBetweenHeartbeat
+            +",runningThreads="+runningThreads
+            +"}";
     }
 }

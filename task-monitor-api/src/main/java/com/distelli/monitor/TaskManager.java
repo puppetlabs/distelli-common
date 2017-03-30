@@ -18,4 +18,8 @@ public interface TaskManager {
 
     // Turn on task queue monitoring:
     public void monitorTaskQueue();
+
+    // Turn off task queue monitoring and wait for any pending tasks
+    // to complete:
+    public void stopTaskQueueMonitor(boolean mayInterruptIfRunning);
 }

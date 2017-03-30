@@ -114,30 +114,30 @@ public class MonitorImpl implements Monitor {
     @Override
     public void monitor(Monitored task) {
         MonitorInfoImpl monitor = null;
+        MonitorInfoImpl shutdownMonitor = null;
         synchronized ( this ) {
             if ( null == _reaper ) {
                 throw new ShuttingDownException();
             }
             monitor = _activeMonitorInfo;
-        }
-        if ( null == monitor || monitor.hasFailedHeartbeat() ) {
-            monitor = new MonitorInfoImpl(
-                _productVersion.toString(),
-                HEARTBEAT_INTERVAL_MS * REAP_INTERVALS);
-            MonitorInfoImpl shutdownMonitor = null;
-            synchronized ( this ) {
-                if ( null == _activeMonitorInfo || _activeMonitorInfo.hasFailedHeartbeat() ) {
-                    shutdownMonitor = _activeMonitorInfo;
-                    _monitorsToShutdown.add(monitor);
-                    _monitors.putItem(monitor);
-                    _activeMonitorInfo = monitor;
-                } else {
-                    monitor = _activeMonitorInfo;
+
+            if ( null == monitor || monitor.hasFailedHeartbeat() ) {
+                monitor = new MonitorInfoImpl(
+                    _productVersion.toString(),
+                    HEARTBEAT_INTERVAL_MS * REAP_INTERVALS);
+                shutdownMonitor = _activeMonitorInfo;
+                _monitorsToShutdown.add(monitor);
+                if ( LOG.isDebugEnabled() ) {
+                    LOG.debug("activeMonitor="+_activeMonitorInfo+" new="+monitor);
                 }
+                _monitors.putItem(monitor);
+                _activeMonitorInfo = monitor;
+            } else {
+                monitor = _activeMonitorInfo;
             }
-            if ( null != shutdownMonitor ) {
-                shutdown(shutdownMonitor);
-            }
+        }
+        if ( null != shutdownMonitor ) {
+            shutdown(shutdownMonitor);
         }
         try {
             monitor.captureRunningThread();
@@ -154,7 +154,7 @@ public class MonitorImpl implements Monitor {
     }
 
     private static long milliTime() {
-        return TimeUnit.NANOSECONDS.convert(System.nanoTime(), TimeUnit.MILLISECONDS);
+        return TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
     }
 
     private void shutdown() {
@@ -207,34 +207,39 @@ public class MonitorImpl implements Monitor {
     }
 
     private void reaper() {
-        synchronized ( _heartbeats ) {
-            Set<String> monitorIds = new HashSet<>(_heartbeats.keySet());
-            for ( PageIterator iter : new PageIterator().pageSize(100) ) {
-                for ( MonitorInfoImpl monitor : listMonitors(iter) ) {
-                    String monitorId = monitor.getMonitorId();
-                    monitorIds.remove(monitorId);
-                    Long lastHB = _heartbeats.get(monitorId);
-                    _heartbeats.put(monitorId, monitor.getHeartbeat());
-                    // New monitor observed:
-                    if ( null == lastHB ) {
-                        continue;
+        try {
+            synchronized ( _heartbeats ) {
+                Set<String> monitorIds = new HashSet<>(_heartbeats.keySet());
+                for ( PageIterator iter : new PageIterator().pageSize(100) ) {
+                    for ( MonitorInfoImpl monitor : listMonitors(iter) ) {
+                        String monitorId = monitor.getMonitorId();
+                        monitorIds.remove(monitorId);
+                        Long lastHB = _heartbeats.get(monitorId);
+                        _heartbeats.put(monitorId, monitor.getHeartbeat());
+                        // New monitor observed:
+                        if ( null == lastHB ) {
+                            continue;
+                        }
+                        // Heartbeats observed:
+                        if ( monitor.getHeartbeat() != lastHB ) {
+                            continue;
+                        }
+                        // Dead monitor observed:
+                        reap(monitor);
                     }
-                    // Heartbeats observed:
-                    if ( monitor.getHeartbeat() != lastHB ) {
-                        continue;
-                    }
-                    // Dead monitor observed:
-                    reap(monitor);
+                }
+                // Keep the _heartbeats map tidy:
+                for ( String monitorId : monitorIds ) {
+                    _heartbeats.remove(monitorId);
                 }
             }
-            // Keep the _heartbeats map tidy:
-            for ( String monitorId : monitorIds ) {
-                _heartbeats.remove(monitorId);
-            }
+        } catch ( Throwable ex ) {
+            LOG.error(ex.getMessage(), ex);
         }
     }
 
     private void reap(MonitorInfoImpl monitor) {
+        LOG.debug("Adding task to reap monitorId="+monitor.getMonitorId());
         // Add task to delete references:
         _taskManager.addTask(
             _reapMonitorTask.build(
@@ -243,29 +248,33 @@ public class MonitorImpl implements Monitor {
     }
 
     private void heartbeat() {
-        MonitorInfoImpl monitor = null;
         try {
-            synchronized ( this ) {
-                monitor = _activeMonitorInfo;
+            MonitorInfoImpl monitor = null;
+            try {
+                synchronized ( this ) {
+                    monitor = _activeMonitorInfo;
+                }
+                // We are already shutting down:
+                if ( null == monitor || monitor.hasFailedHeartbeat() ) return;
+                _monitors.updateItem(monitor.getMonitorId(), null)
+                    .increment("hb", 1)
+                    .when((expr) -> expr.exists("id"));
+                monitor.heartbeatWasPerformed();
+                return;
+            } catch ( Throwable ex ) {
+                if ( ex instanceof RollbackException ) {
+                    // This could happen if the computer is put to sleep:
+                    LOG.warn("Detected monitor deletion, forcing all tasks to stop (perhaps computer sleeped).");
+                } else {
+                    LOG.error(ex.getMessage(), ex);
+                }
+                if ( null != monitor ) {
+                    monitor.forceHeartbeatFailure();
+                    shutdown(monitor);
+                }
             }
-            // We are already shutting down:
-            if ( null == monitor || monitor.hasFailedHeartbeat() ) return;
-            _monitors.updateItem(monitor.getMonitorId(), null)
-                .increment("hb", 1)
-                .when((expr) -> expr.exists("id"));
-            monitor.heartbeatWasPerformed();
-            return;
         } catch ( Throwable ex ) {
-            if ( ex instanceof RollbackException ) {
-                // This could happen if the computer is put to sleep:
-                LOG.warn("Detected monitor deletion, forcing all tasks to stop (perhaps computer sleeped).");
-            } else {
-                LOG.error(ex.getMessage(), ex);
-            }
-            if ( null != monitor ) {
-                monitor.forceHeartbeatFailure();
-                shutdown(monitor);
-            }
+            LOG.error(ex.getMessage(), ex);
         }
     }
 }

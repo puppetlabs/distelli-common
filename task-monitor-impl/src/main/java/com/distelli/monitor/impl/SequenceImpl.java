@@ -11,7 +11,7 @@ import javax.inject.Inject;
 public class SequenceImpl implements Sequence {
     public static TableDescription getTableDescription() {
         return TableDescription.builder()
-            .tableName("sequences")
+            .tableName("monitor-sequences")
             .index((idx) -> idx
                    .hashKey("nam", AttrType.STR))
             .build();
