@@ -3,6 +3,7 @@ package com.distelli.monitor;
 import com.distelli.crypto.impl.CryptoModule;
 import com.distelli.monitor.impl.MonitorTaskModule;
 import com.distelli.monitor.impl.SequenceImpl;
+import com.distelli.monitor.impl.MonitorImpl;
 import com.distelli.persistence.TableDescription;
 import com.distelli.persistence.impl.PersistenceModule;
 import com.google.inject.AbstractModule;
@@ -25,8 +26,11 @@ import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
 import com.distelli.utils.Log4JConfigurator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TestTaskManager {
+    private static final Logger LOG = LoggerFactory.getLogger(TestTaskManager.class);
     private static PersistenceModule getPersistenceModule() {
         String fileName = System.getenv("TEST_PERSISTENCE_CONFIG");
         if ( null == fileName ) {
@@ -88,6 +92,7 @@ public class TestTaskManager {
 
         public CountDownLatch _latch = null;
         public List<Long> _tasksRan = null;
+        public String _monitorIdFailed = null;
 
         @Override
         public TaskInfo run(TaskContext ctx) throws Exception {
@@ -118,12 +123,21 @@ public class TestTaskManager {
                 .checkpointData((""+remaining).getBytes())
                 .build();
         }
+
+        public TaskInfo testFailedMonitor(TaskContext ctx) throws Exception {
+            LOG.info("Testing a force heartbeat failure");
+            _monitorIdFailed = ctx.getMonitorInfo().getMonitorId();
+            ctx.getMonitorInfo().forceHeartbeatFailure();
+            return null;
+        }
     }
 
     @Inject
     private TaskManager _taskManager;
     @Inject
     private TestTask _testTask;
+    @Inject
+    private MonitorImpl _monitor;
 
     @Before
     public void beforeTest() {
@@ -184,5 +198,88 @@ public class TestTaskManager {
         long duration = milliTime() - t0;
         assertTrue("duration = "+duration, duration >= 1000);
         assertEquals(_taskManager.getTask(task.getTaskId()).getTaskState(), TaskState.SUCCESS);
+    }
+
+    @Test
+    public void testStartRunnableTasks() throws Exception {
+        // Add a task when the task queue is NOT monitoring:
+        CountDownLatch latch = new CountDownLatch(1);
+        _testTask._latch = latch;
+
+        TaskInfo task = _taskManager.createTask()
+            .entityType(TestTask.ENTITY_TYPE)
+            .entityId("testPrerequisite")
+            .build();
+        _taskManager.addTask(task);
+
+        // NOW start monitoring:
+        _taskManager.monitorTaskQueue();
+
+        latch.await();
+        _taskManager.stopTaskQueueMonitor(false);
+
+        assertEquals(_taskManager.getTask(task.getTaskId()).getTaskState(), TaskState.SUCCESS);
+    }
+
+    @Test
+    public void testFailedMonitor() throws Exception {
+        _taskManager.monitorTaskQueue();
+
+        CountDownLatch latch = new CountDownLatch(1);
+        _testTask._latch = latch;
+
+        TaskInfo task = _taskManager.createTask()
+            .entityType(TestTask.ENTITY_TYPE)
+            .entityId("testFailedMonitor")
+            .lockIds("_BROKE")
+            .build();
+        _taskManager.addTask(task);
+
+        latch.await();
+        _taskManager.stopTaskQueueMonitor(false);
+
+        // Should still report success:
+        assertEquals(_taskManager.getTask(task.getTaskId()).getTaskState(), TaskState.SUCCESS);
+
+        // but the "_BROKE" lock should still be around, preventing other tasks from running
+        // until it is cleaned-up:
+        latch = new CountDownLatch(1);
+        _testTask._latch = latch;
+
+        task = _taskManager.createTask()
+            .entityType(TestTask.ENTITY_TYPE)
+            .entityId("testPrerequisite")
+            .lockIds("_BROKE")
+            .build();
+
+        _taskManager.monitorTaskQueue();
+        _taskManager.addTask(task);
+
+        // Verify that we are waiting for lock:
+      POLL:
+        while ( true ) {
+            TaskState state =
+                _taskManager.getTask(task.getTaskId()).getTaskState();
+            switch ( state ) {
+            case QUEUED:
+            case RUNNING: // in this state when scanning for locks.
+                Thread.sleep(100);
+                continue;
+            case WAITING_FOR_LOCK:
+                break POLL;
+            default:
+                fail("Unexpected taskState="+state+" for taskId="+task.getTaskId());
+            }
+        }
+
+        String monitorId = _testTask._monitorIdFailed;
+        _testTask._monitorIdFailed = null;
+        assertNotNull(monitorId);
+
+        // Cleanup:
+        _monitor.reapMonitorId(monitorId);
+        // Verify that task is now ran since the lock should have been cleaned up:
+        latch.await();
+        _taskManager.stopTaskQueueMonitor(false);
     }
 }

@@ -129,6 +129,8 @@ public class TaskManagerImpl implements TaskManager {
             return TableDescription.builder()
                 .tableName("monitor-locks")
                 .index((idx) -> idx
+                       // We do a LOT of writing on this table!
+                       .writeCapacity(2L)
                        .hashKey("lid", AttrType.STR)
                        // "actual" locks have tid=TASK_ID_NONE:
                        .rangeKey("tid", AttrType.STR))
@@ -669,17 +671,18 @@ public class TaskManagerImpl implements TaskManager {
         private MonitorInfo _monitorInfo;
         private TaskContextImpl(Task task, MonitorInfo monitorInfo) {
             _task = task;
-            monitorInfo = _monitorInfo;
+            _monitorInfo = monitorInfo;
         }
         @Override
         public TaskInfo getTaskInfo() {
             return _task;
         }
         @Override
+        public MonitorInfo getMonitorInfo() {
+            return _monitorInfo;
+        }
+        @Override
         public void commitState(byte[] checkpointData) {
-            if ( null == _monitorInfo.getMonitorId() ) {
-                throw new IllegalStateException("commitState() can only be called within the context of TaskFunction.run()");
-            }
             try {
                 _tasks.updateItem(_task.getTaskId(), null)
                     .set("st8", checkpointData)
@@ -768,7 +771,7 @@ public class TaskManagerImpl implements TaskManager {
                 Thread.currentThread().setName(threadName);
             }
             if ( monitorInfo.hasFailedHeartbeat() ) {
-                Thread.currentThread().interrupt();
+                if ( interrupted ) Thread.currentThread().interrupt();
                 return;
             }
             try {
@@ -779,7 +782,7 @@ public class TaskManagerImpl implements TaskManager {
                           ex.getMessage(), ex);
                 monitorInfo.forceHeartbeatFailure();
             }
-            if ( interrupted || monitorInfo.hasFailedHeartbeat() ) {
+            if ( interrupted ) {
                 Thread.currentThread().interrupt();
             }
         }

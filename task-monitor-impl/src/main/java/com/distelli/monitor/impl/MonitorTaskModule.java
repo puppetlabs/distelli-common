@@ -24,6 +24,7 @@ public class MonitorTaskModule extends AbstractModule {
             ReapMonitorTask.class);
         bind(TaskManagerImpl.class).in(Singleton.class);
         bind(TaskManager.class).to(TaskManagerImpl.class);
-        bind(Monitor.class).to(MonitorImpl.class).in(Singleton.class);
+        bind(MonitorImpl.class).in(Singleton.class);
+        bind(Monitor.class).to(MonitorImpl.class);
     }
 }

@@ -2,6 +2,7 @@ package com.distelli.monitor.impl;
 
 import com.distelli.monitor.Monitored;
 import com.distelli.monitor.Monitor;
+import com.distelli.monitor.TaskInfo;
 import com.distelli.monitor.MonitorInfo;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -225,7 +226,7 @@ public class MonitorImpl implements Monitor {
                             continue;
                         }
                         // Dead monitor observed:
-                        reap(monitor);
+                        reapMonitorId(monitor.getMonitorId());
                     }
                 }
                 // Keep the _heartbeats map tidy:
@@ -238,13 +239,15 @@ public class MonitorImpl implements Monitor {
         }
     }
 
-    private void reap(MonitorInfoImpl monitor) {
-        LOG.debug("Adding task to reap monitorId="+monitor.getMonitorId());
+    // public only for testing purposes:
+    public TaskInfo reapMonitorId(String monitorId) {
+        LOG.debug("Adding task to reap monitorId="+monitorId);
         // Add task to delete references:
-        _taskManager.addTask(
-            _reapMonitorTask.build(
-                _taskManager.createTask(), monitor.getMonitorId()));
-        _monitors.deleteItem(monitor.getMonitorId(), null);
+        TaskInfo task =
+            _reapMonitorTask.build(_taskManager.createTask(), monitorId);
+        _taskManager.addTask(task);
+        _monitors.deleteItem(monitorId, null);
+        return task;
     }
 
     private void heartbeat() {
