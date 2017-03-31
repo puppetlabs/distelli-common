@@ -208,6 +208,7 @@ public class TaskManagerImpl implements TaskManager {
     // Marks a task as "to be canceled":
     @Override
     public void cancelTask(String canceledBy, long taskId) {
+        if ( null == canceledBy ) throw new IllegalArgumentException("canceledBy may not be null");
         try {
             _tasks.updateItem(taskId, null)
                 .set("cancel", canceledBy)
@@ -682,7 +683,7 @@ public class TaskManagerImpl implements TaskManager {
             return _monitorInfo;
         }
         @Override
-        public void commitState(byte[] checkpointData) {
+        public void commitCheckpointData(byte[] checkpointData) {
             try {
                 _tasks.updateItem(_task.getTaskId(), null)
                     .set("st8", checkpointData)

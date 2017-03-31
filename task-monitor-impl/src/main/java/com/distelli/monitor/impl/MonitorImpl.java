@@ -125,7 +125,7 @@ public class MonitorImpl implements Monitor {
             if ( null == monitor || monitor.hasFailedHeartbeat() ) {
                 monitor = new MonitorInfoImpl(
                     _productVersion.toString(),
-                    HEARTBEAT_INTERVAL_MS * REAP_INTERVALS);
+                    HEARTBEAT_INTERVAL_MS * (REAP_INTERVALS - 1));
                 shutdownMonitor = _activeMonitorInfo;
                 _monitorsToShutdown.add(monitor);
                 if ( LOG.isDebugEnabled() ) {
@@ -137,15 +137,18 @@ public class MonitorImpl implements Monitor {
                 monitor = _activeMonitorInfo;
             }
         }
-        if ( null != shutdownMonitor ) {
+        if ( null != shutdownMonitor && ! shutdownMonitor.isRunningInMonitoredThread() ) {
             shutdown(shutdownMonitor);
         }
         try {
             monitor.captureRunningThread();
             task.run(monitor);
         } finally {
-            monitor.releaseRunningThread();
-            if ( monitor.hasFailedHeartbeat() ) shutdown(monitor);
+            if ( monitor.releaseRunningThread() &&
+                 monitor.hasFailedHeartbeat() )
+            {
+                shutdown(monitor);
+            }
         }
     }
 
@@ -180,6 +183,7 @@ public class MonitorImpl implements Monitor {
     }
 
     private void shutdown(MonitorInfoImpl monitor) {
+        monitor.forceHeartbeatFailure();
         synchronized ( this ) {
             if ( _activeMonitorInfo == monitor ) {
                 // Make sure this is NOT the active monitor:
@@ -190,9 +194,19 @@ public class MonitorImpl implements Monitor {
         long waitTime = monitor.getLastHeartbeatMillis()
             + ( HEARTBEAT_INTERVAL_MS * REAP_INTERVALS )
             - milliTime();
+
+        // Make sure we always have at least SOME wait time
+        if ( waitTime < 200 ) {
+            LOG.warn("Adjusting waitTime="+waitTime+"ms to 200ms when running shutdown("+monitor.getMonitorId()+")");
+            waitTime = 200;
+        }
+
         if ( ! monitor.interruptAndWaitForRunningThreads(waitTime) ) {
-            LOG.error("Failed to halt all threads, failing this monitor");
-            monitor.forceHeartbeatFailure();
+            String msg = "Failed to halt the following threads in "+waitTime+"ms. Halting the JVM:\n"+
+                monitor.dumpThreads();
+            LOG.error(msg);
+            System.err.println(msg);
+            System.exit(-1);
         }
 
         if ( ! monitor.hasFailedHeartbeat() ) {

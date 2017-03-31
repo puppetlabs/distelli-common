@@ -1,13 +1,38 @@
 package com.distelli.monitor;
 
 public interface MonitorInfo {
-    // The current monitor id used by this thread, or null if this has expired:
-    public String getMonitorId(); // Compact UUID.
-    // True if the heartbeat for this monitor has failed (and thus the
-    // thread is being interrupted).
+    /**
+     * @return the unique identifier of the monitor which is an 11 character
+     *         compact UUID.
+     */
+    public String getMonitorId();
+    /**
+     * @return true if this heartbeat has either been marked as failure or
+     *         has not been able to perform a heartbeat in 50 seconds.
+     */
     public boolean hasFailedHeartbeat();
-    public String getNodeName(); // ManagementFactory.getRuntimeMXBean().getName()
-    public String getVersion();  // product version
-    public long getHeartbeat();  // incremented on regular intervals.
+    /**
+     * Current implementation obtains this from ManagementFactory.getRuntimeMXBean().getName().
+     *
+     * @return the name of the node that is performing the heartbeat.
+     */
+    public String getNodeName();
+    /**
+     * Current implementation obtains this from the injected ProductVersion.
+     *
+     * @return the product version that is performing the heartbeat.
+     */
+    public String getVersion();
+    /**
+     * The heartbeat is incremented every 10 seconds.
+     *
+     * @return the heartbeat count.
+     */
+    public long getHeartbeat();
+    /**
+     * Force the monitor to be marked as heartbeat failed. This method
+     * should only be used as a last resort since it effects all tasks
+     * running with this monitor.
+     */
     public void forceHeartbeatFailure();
 }

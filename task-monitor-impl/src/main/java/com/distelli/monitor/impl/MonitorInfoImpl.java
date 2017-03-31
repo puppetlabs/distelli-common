@@ -45,7 +45,7 @@ public class MonitorInfoImpl implements MonitorInfo {
     public synchronized boolean hasFailedHeartbeat() {
         if ( ! hasFailedHeartbeat && milliTime() - lastHeartbeatMillis > maxTimeBetweenHeartbeat ) {
             LOG.error("Forcing heartbeat failure due to max time between heartbeat");
-            hasFailedHeartbeat = true;
+            forceHeartbeatFailure();
         }
         return hasFailedHeartbeat;
     }
@@ -70,6 +70,11 @@ public class MonitorInfoImpl implements MonitorInfo {
         hasFailedHeartbeat = true;
     }
 
+    public synchronized boolean isRunningInMonitoredThread() {
+        AtomicInteger count = runningThreads.get(Thread.currentThread());
+        return null != count && count.get() > 0;
+    }
+
     public synchronized void captureRunningThread() {
         Thread thread = Thread.currentThread();
         AtomicInteger count = runningThreads.get(thread);
@@ -80,13 +85,16 @@ public class MonitorInfoImpl implements MonitorInfo {
         count.incrementAndGet();
     }
 
-    public synchronized void releaseRunningThread() {
+    // Returns true if the count for this thread drops to zero:
+    public synchronized boolean releaseRunningThread() {
         Thread thread = Thread.currentThread();
         AtomicInteger count = runningThreads.get(thread);
-        if ( null != count && 0 == count.decrementAndGet() ) {
+        if ( null == count || 0 == count.decrementAndGet() ) {
             runningThreads.remove(thread);
             if ( runningThreads.isEmpty() ) notifyAll();
+            return true;
         }
+        return false;
     }
 
     public synchronized boolean heartbeatWasPerformed() {
@@ -101,6 +109,17 @@ public class MonitorInfoImpl implements MonitorInfo {
 
     private static long milliTime() {
         return TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
+    }
+
+    public synchronized String dumpThreads() {
+        StringBuilder sb = new StringBuilder();
+        for ( Thread thread : runningThreads.keySet() ) {
+            sb.append(thread.getName()).append(":\n");
+            for ( StackTraceElement ste : thread.getStackTrace() ) {
+                sb.append("\t").append(ste.toString()).append("\n");
+            }
+        }
+        return sb.toString();
     }
 
     // Returns true if all threads got shutdown in the millisWaitMax time.

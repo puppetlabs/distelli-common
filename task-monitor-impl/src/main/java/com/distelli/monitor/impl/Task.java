@@ -7,6 +7,7 @@ import com.distelli.monitor.TaskState;
 import com.distelli.monitor.TaskInfo;
 import com.distelli.monitor.TaskBuilder;
 import static javax.xml.bind.DatatypeConverter.printBase64Binary;
+
 public class Task implements TaskInfo {
     public Long taskId;
     public String entityType;
@@ -45,77 +46,95 @@ public class Task implements TaskInfo {
         canceledBy = src.canceledBy;
     }
 
+    @Override
     public Long getTaskId() {
         return taskId;
     }
 
+    @Override
     public String getEntityType() {
         return entityType;
     }
 
+    @Override
     public String getEntityId() {
         return entityId;
     }
 
+    @Override
     public TaskState getTaskState() {
         return taskState;
     }
 
+    @Override
     public Set<String> getLockIds() {
         if ( null == lockIds ) return Collections.emptySet();
         return Collections.unmodifiableSet(lockIds);
     }
 
+    @Override
     public Set<Long> getPrerequisiteTaskIds() {
         if ( null == prerequisiteTaskIds ) return Collections.emptySet();
         return Collections.unmodifiableSet(prerequisiteTaskIds);
     }
 
+    @Override
     public String getMonitorId() {
         return monitorId;
     }
 
+    @Override
     public byte[] getCheckpointData() {
         if ( null == checkpointData ) return null;
         return Arrays.copyOf(checkpointData, checkpointData.length);
     }
 
+    @Override
     public String getErrorMessage() {
         return errorMessage;
     }
 
+    @Override
     public String getErrorId() {
         return errorId;
     }
 
+    @Override
     public String getErrorStackTrace() {
         return errorMessageStackTrace;
     }
 
+    @Override
     public Long getStartTime() {
         return startTime;
     }
 
+    @Override
     public Long getEndTime() {
         return endTime;
     }
 
+    @Override
     public Long getRunCount() {
         return runCount;
     }
 
+    @Override
     public Long getMillisecondsRemaining() {
         return millisecondsRemaining;
     }
 
+    @Override
     public String getCanceledBy() {
         return canceledBy;
     }
 
+    @Override
     public TaskBuilder toBuilder() {
         return new TaskBuilderImpl(new Task(this));
     }
 
+    @Override
     public String toString() {
         return "TaskInfo:{"
             +"taskId="+taskId
