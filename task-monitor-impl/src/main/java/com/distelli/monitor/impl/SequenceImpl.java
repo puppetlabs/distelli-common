@@ -11,9 +11,9 @@ import javax.inject.Inject;
 public class SequenceImpl implements Sequence {
     public static TableDescription getTableDescription() {
         return TableDescription.builder()
-            .tableName("monitor-sequences")
+            .tableName("sequences")
             .index((idx) -> idx
-                   .hashKey("nam", AttrType.STR))
+                   .hashKey("SKey", AttrType.STR))
             .build();
     }
 
@@ -27,8 +27,8 @@ public class SequenceImpl implements Sequence {
 
     private TransformModule createTransforms(TransformModule module) {
         module.createTransform(SequenceInfo.class)
-            .put("nxt", Long.class, "next")
-            .put("nam", String.class, "name");
+            .put("Seq", Long.class, "next")
+            .put("SKey", String.class, "name");
         return module;
     }
 
@@ -38,7 +38,7 @@ public class SequenceImpl implements Sequence {
 
         _sequences = indexFactory.create(SequenceInfo.class)
             .withTableDescription(getTableDescription())
-            .withNoEncrypt("nxt")
+            .withNoEncrypt("Seq")
             .withConvertValue(_om::convertValue)
             .build();
     }
@@ -46,7 +46,7 @@ public class SequenceImpl implements Sequence {
     @Override
     public long next(String name) {
         return _sequences.updateItem(name, null)
-            .increment("nxt", 1)
+            .increment("Seq", 1)
             .returnAllNew()
             .always()
             .next;

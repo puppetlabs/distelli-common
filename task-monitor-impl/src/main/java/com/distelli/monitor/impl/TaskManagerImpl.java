@@ -44,6 +44,7 @@ import javax.inject.Inject;
 import com.distelli.monitor.Sequence;
 import com.fasterxml.jackson.core.type.TypeReference;
 import javax.inject.Singleton;
+import java.util.Collection;
 
 /**
  * If we loose DB connection or the JVM is `kill -9`ed, then tasks in these states will
@@ -63,6 +64,7 @@ public class TaskManagerImpl implements TaskManager {
     private static final String MONITOR_ID_QUEUED = "#";
     private static final String MONITOR_ID_WAITING = "$";
     private static final Logger LOG = LoggerFactory.getLogger(TaskManagerImpl.class);
+    private static Collection<String> TERMINAL_STATES;
 
     @Inject
     private Monitor _monitor;
@@ -78,6 +80,7 @@ public class TaskManagerImpl implements TaskManager {
     private Index<Task> _tasks;
     private Index<Task> _tasksForMonitor;
     private Index<Task> _tasksForEntity;
+    private Index<Task> _nonTerminalTasksForEntity;
     private final ObjectMapper _om = new ObjectMapper();
     private final Map<Long, DelayedTask> _delayedTasks =
         new ConcurrentHashMap<>();
@@ -88,8 +91,6 @@ public class TaskManagerImpl implements TaskManager {
     private ScheduledFuture<?> _monitorTasks;
     // synchronized(this):
     private Set<Future<?>> _spawnedFutures = new HashSet<>();
-    // synchronized(this):
-    private boolean _hasShutdownHook = false;
 
     private static class DelayedTask {
         private DelayedTask(long millisRemaining) {
@@ -118,6 +119,11 @@ public class TaskManagerImpl implements TaskManager {
                        .indexName("ety-eid-index")
                        .hashKey("ety", AttrType.STR)
                        .rangeKey("eid", AttrType.STR))
+                // Same as above, but only include non-terminals:
+                .index((idx) -> idx
+                       .indexName("ntty-ntid-index")
+                       .hashKey("ntty", AttrType.STR)
+                       .rangeKey("ntid", AttrType.STR))
                 .build();
         }
     }
@@ -145,6 +151,20 @@ public class TaskManagerImpl implements TaskManager {
     @Override
     public List<? extends TaskInfo> getTasksByEntityType(String entityType, PageIterator iter) {
         return _tasksForEntity.queryItems(entityType, iter).list();
+    }
+
+    @Override
+    public List<? extends TaskInfo> getNonTerminalTasksByEntityIdBeginsWith(
+        String entityType, String taskIdBeginsWith, PageIterator iter)
+    {
+
+        if ( null == taskIdBeginsWith || "".equals(taskIdBeginsWith) ) {
+            return _nonTerminalTasksForEntity.queryItems(entityType, iter)
+                .list();
+        }
+        return _nonTerminalTasksForEntity.queryItems(entityType, iter)
+            .beginsWith(taskIdBeginsWith)
+            .list();
     }
 
     @Override
@@ -205,6 +225,23 @@ public class TaskManagerImpl implements TaskManager {
         submitRunTask(task.getTaskId());
     }
 
+    @Override
+    public void deleteTask(long taskId) throws IllegalStateException {
+        try {
+            _tasks.deleteItem(
+                taskId, null, (expr) ->
+                expr.or(
+                    expr.not(expr.exists("id")),
+                    expr.or(
+                        expr.not(expr.exists("mid")),
+                        expr.in(
+                            "mid",
+                            Arrays.asList(MONITOR_ID_QUEUED, MONITOR_ID_WAITING)))));
+        } catch ( RollbackException ex ) {
+            throw new IllegalStateException("Attempt to deleteTask("+taskId+") which is currently locked");
+        }
+    }
+
     // Marks a task as "to be canceled":
     @Override
     public void cancelTask(String canceledBy, long taskId) {
@@ -236,19 +273,6 @@ public class TaskManagerImpl implements TaskManager {
             ThreadLocalRandom.current().nextLong(POLL_INTERVAL_MS),
             POLL_INTERVAL_MS,
             TimeUnit.MILLISECONDS);
-        TaskManagerImpl taskManager = this;
-        if ( _hasShutdownHook ) return;
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-                @Override
-                public void run() {
-                    try {
-                        stopTaskQueueMonitor(true);
-                    } catch ( Throwable ex ) {
-                        LOG.error(ex.getMessage(), ex);
-                    }
-                }
-            });
-        _hasShutdownHook = true;
     }
 
     @Override
@@ -347,6 +371,12 @@ public class TaskManagerImpl implements TaskManager {
             .withNoEncrypt(noEncrypt)
             .build();
 
+        _nonTerminalTasksForEntity = indexFactory.create(Task.class)
+            .withTableDescription(TasksTable.getTableDescription(), "ntty-ntid-index")
+            .withConvertValue(_om::convertValue)
+            .withNoEncrypt(noEncrypt)
+            .build();
+
         noEncrypt = new String[]{"mid", "agn"};
         _locks = indexFactory.create(Lock.class)
             .withNoEncrypt(noEncrypt)
@@ -366,6 +396,8 @@ public class TaskManagerImpl implements TaskManager {
             .put("id", Long.class, "taskId")
             .put("ety", String.class, "entityType")
             .put("eid", String.class, TaskManagerImpl::toEid, TaskManagerImpl::fromEid)
+            .put("ntty", String.class, TaskManagerImpl::toNtty)
+            .put("ntid", String.class, TaskManagerImpl::toNtid) // non-terminal state?
             .put("stat", String.class, TaskManagerImpl::toState, TaskManagerImpl::fromState)
             .put("lids", new TypeReference<Set<String>>(){}, "lockIds")
             .put("preq", new TypeReference<Set<Long>>(){}, "prerequisiteTaskIds")
@@ -394,6 +426,16 @@ public class TaskManagerImpl implements TaskManager {
 
     private static void fromState(Task task, String state) {
         task.taskState = toTaskState(state);
+    }
+
+    private synchronized static Collection<String> getTerminalStates() {
+        if ( null == TERMINAL_STATES ) {
+            TERMINAL_STATES = new ArrayList<>();
+            for ( TaskState state : TaskState.values() ) {
+                if ( state.isTerminal() ) TERMINAL_STATES.add(toString(state));
+            }
+        }
+        return TERMINAL_STATES;
     }
 
     private static String toString(TaskState taskState) {
@@ -431,7 +473,8 @@ public class TaskManagerImpl implements TaskManager {
 
     // We add the taskId on the end to force sort order:
     private static String toEid(Task task) {
-        return validEntityId(task.entityId) + "@" + longToSortKey(task.taskId);
+        if ( null == task.entityId ) return null;
+        return task.entityId + "@" + longToSortKey(task.taskId);
     }
 
     private static void fromEid(Task task, String eid) {
@@ -439,11 +482,20 @@ public class TaskManagerImpl implements TaskManager {
         task.entityId = eid.substring(0, eid.length()-LONG_SORT_KEY_LENGTH-1);
     }
 
-    private static String validEntityId(String entityId) {
-        if ( null == entityId ) {
-            throw new IllegalArgumentException("entityId must not be null");
+    private static String toNtty(Task task) {
+        if ( null != task.taskState && task.taskState.isTerminal() ) {
+            // terminal state:
+            return null;
         }
-        return entityId;
+        return task.entityType;
+    }
+
+    private static String toNtid(Task task) {
+        if ( null != task.taskState && task.taskState.isTerminal() ) {
+            // terminal state:
+            return null;
+        }
+        return toEid(task);
     }
 
     private static long milliTime() {
@@ -632,7 +684,8 @@ public class TaskManagerImpl implements TaskManager {
         Collections.sort(lockIds);
         for ( String lockId : lockIds ) {
             // Enqueue:
-            _locks.putItem(new Lock(lockId, longToSortKey(task.getTaskId())));
+            String taskIdStr = longToSortKey(task.getTaskId());
+            _locks.putItem(new Lock(lockId, taskIdStr));
 
             Long prerequisiteId = lockIdToTaskId.get(lockId);
             if ( null != prerequisiteId ) {
@@ -641,6 +694,9 @@ public class TaskManagerImpl implements TaskManager {
                     finalTaskState.set(TaskState.WAITING_FOR_PREREQUISITE);
                     return false;
                 }
+                // Remove enqueue:
+                _locks.deleteItem(lockId, taskIdStr);
+                continue;
             }
 
             // Try to acquire:
@@ -840,7 +896,9 @@ public class TaskManagerImpl implements TaskManager {
         }
         String monitorId = monitorIdForState(state);
         if ( null == monitorId ) {
-            update.remove("mid");
+            update.remove("mid")
+                .remove("ntty")
+                .remove("ntid");
         } else {
             update.set("mid", monitorId);
         }
@@ -859,6 +917,8 @@ public class TaskManagerImpl implements TaskManager {
             _tasks.updateItem(taskId, null)
                 .set("stat", toString(TaskState.CANCELED))
                 .remove("mid")
+                .remove("ntty")
+                .remove("ntid")
                 .when((expr) -> expr.eq("mid", monitorId));
         } catch ( RollbackException ex ) {
             throw new LostLockException(taskId);
@@ -877,7 +937,9 @@ public class TaskManagerImpl implements TaskManager {
 
                     UpdateItemBuilder update = _tasks.updateItem(taskId, null);
                     if ( null == monitorId ) {
-                        update.remove("mid");
+                        update.remove("mid")
+                            .remove("ntty")
+                            .remove("ntid");
                     } else {
                         update.set("mid", monitorId);
                     }

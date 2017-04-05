@@ -123,13 +123,15 @@ public class MonitorInfoImpl implements MonitorInfo {
     }
 
     // Returns true if all threads got shutdown in the millisWaitMax time.
-    public synchronized boolean interruptAndWaitForRunningThreads(long millisWaitMax) {
-        Thread cur = Thread.currentThread();
-        for ( Thread thread : runningThreads.keySet() ) {
-            if ( cur == thread ) {
-                throw new IllegalStateException("interruptAndWaitForRunningThreads() called within a monitor()");
+    public synchronized boolean interruptAndWaitForRunningThreads(long millisWaitMax, boolean mayInterruptIfRunning) {
+        if ( mayInterruptIfRunning ) {
+            Thread cur = Thread.currentThread();
+            for ( Thread thread : runningThreads.keySet() ) {
+                if ( cur == thread ) {
+                    throw new IllegalStateException("interruptAndWaitForRunningThreads() called within a monitor()");
+                }
+                thread.interrupt();
             }
-            thread.interrupt();
         }
         long start = milliTime();
         while ( ! runningThreads.isEmpty() ) {

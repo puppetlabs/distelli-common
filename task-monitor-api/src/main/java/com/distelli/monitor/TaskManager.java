@@ -20,6 +20,18 @@ public interface TaskManager {
     public List<? extends TaskInfo> getTasksByEntityType(String entityType, PageIterator iter);
 
     /**
+     * @param entityType of tasks to query for.
+     *
+     * @param taskIdBeginsWith is what the task id must begin with.
+     *
+     * @param iter used for iterating over all tasks.
+     *
+     * @return the list of tasks.
+     */
+    public List<? extends TaskInfo> getNonTerminalTasksByEntityIdBeginsWith(
+        String entityType, String taskIdBeginsWith, PageIterator iter);
+
+    /**
      * @param taskId of the task to obtain.
      *
      * @return the cooresponding task or null if the task was not found.
@@ -52,6 +64,17 @@ public interface TaskManager {
      * @param taskInfo contains the information of the task to be added.
      */
     public void addTask(TaskInfo taskInfo);
+
+
+    /**
+     * Delete a task that is not locked by a task monitor.
+     *
+     * @param taskId is the identifier of the task to delete.
+     *
+     * @throws IllegalStateException if the task is currently
+     *     locked.
+     */
+    public void deleteTask(long taskId) throws IllegalStateException;
 
     /**
      * Indicate that a task is desired to be canceled. Cancelation does not

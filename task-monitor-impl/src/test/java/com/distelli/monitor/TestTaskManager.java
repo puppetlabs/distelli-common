@@ -104,6 +104,10 @@ public class TestTaskManager {
             }
         }
 
+        public TaskInfo testNoop(TaskContext ctx) throws Exception {
+            return null;
+        }
+
         public TaskInfo testPrerequisite(TaskContext ctx) throws Exception {
             Set<Long> prerequisisteTaskIds = ctx.getTaskInfo().getPrerequisiteTaskIds();
             Long taskId = ( prerequisisteTaskIds.isEmpty() ) ? null : prerequisisteTaskIds.iterator().next();
@@ -208,7 +212,7 @@ public class TestTaskManager {
 
         TaskInfo task = _taskManager.createTask()
             .entityType(TestTask.ENTITY_TYPE)
-            .entityId("testPrerequisite")
+            .entityId("testNoop")
             .build();
         _taskManager.addTask(task);
 
@@ -248,7 +252,7 @@ public class TestTaskManager {
 
         task = _taskManager.createTask()
             .entityType(TestTask.ENTITY_TYPE)
-            .entityId("testPrerequisite")
+            .entityId("testNoop")
             .lockIds("_BROKE")
             .build();
 
@@ -265,6 +269,7 @@ public class TestTaskManager {
             case RUNNING: // in this state when scanning for locks.
                 Thread.sleep(100);
                 continue;
+            case SUCCESS: // monitor may have already been cleaned-up:
             case WAITING_FOR_LOCK:
                 break POLL;
             default:

@@ -1,33 +1,34 @@
 package com.distelli.monitor.impl;
 
-import com.distelli.monitor.Monitored;
+import com.distelli.jackson.transform.TransformModule;
 import com.distelli.monitor.Monitor;
-import com.distelli.monitor.TaskInfo;
 import com.distelli.monitor.MonitorInfo;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import com.distelli.monitor.TaskManager;
+import com.distelli.monitor.Monitored;
 import com.distelli.monitor.ProductVersion;
-import com.distelli.persistence.TableDescription;
-import com.distelli.persistence.Index;
+import com.distelli.monitor.TaskContext;
+import com.distelli.monitor.TaskInfo;
+import com.distelli.monitor.TaskManager;
 import com.distelli.persistence.AttrType;
-import com.distelli.persistence.PageIterator;
+import com.distelli.persistence.Index;
 import com.distelli.persistence.IndexDescription;
+import com.distelli.persistence.PageIterator;
+import com.distelli.persistence.TableDescription;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.Map;
 import java.util.HashMap;
-import java.util.Set;
 import java.util.HashSet;
 import java.util.List;
-import com.distelli.jackson.transform.TransformModule;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import javax.inject.Inject;
+import javax.inject.Singleton;
+import javax.persistence.RollbackException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import javax.inject.Inject;
-import javax.persistence.RollbackException;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.NoSuchElementException;
-import javax.inject.Singleton;
 
 @Singleton
 public class MonitorImpl implements Monitor {
@@ -58,6 +59,8 @@ public class MonitorImpl implements Monitor {
     private ScheduledFuture<?> _heartbeat;
     // synchronize(this):
     private Set<MonitorInfoImpl> _monitorsToShutdown = new HashSet<>();
+    // synchronize(this):
+    private boolean _shuttingDown = false;
 
     public static TableDescription getTableDescription() {
         return TableDescription.builder()
@@ -79,6 +82,7 @@ public class MonitorImpl implements Monitor {
 
     @Inject
     protected MonitorImpl() {}
+
     @Inject
     protected void init(Index.Factory indexFactory) {
         _om.registerModule(createTransforms(new TransformModule()));
@@ -88,28 +92,30 @@ public class MonitorImpl implements Monitor {
             .withTableDescription(getTableDescription())
             .withConvertValue(_om::convertValue)
             .build();
+    }
 
-        long reapInterval = HEARTBEAT_INTERVAL_MS * REAP_INTERVALS;
-        _reaper = _executor.scheduleAtFixedRate(
-            this::reaper,
-            ThreadLocalRandom.current().nextLong(reapInterval),
-            reapInterval,
-            TimeUnit.MILLISECONDS);
-        _heartbeat = _executor.scheduleAtFixedRate(
-            this::heartbeat,
-            ThreadLocalRandom.current().nextLong(HEARTBEAT_INTERVAL_MS),
-            HEARTBEAT_INTERVAL_MS,
-            TimeUnit.MILLISECONDS);
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-                @Override
-                public void run() {
-                    try {
-                        shutdown();
-                    } catch ( Throwable ex ) {
-                        LOG.error(ex.getMessage(), ex);
-                    }
-                }
-            });
+    private synchronized void scheduleHeartbeat() {
+        if ( _shuttingDown ) throw new ShuttingDownException();
+        if ( null == _reaper ) {
+            long reapInterval = HEARTBEAT_INTERVAL_MS * REAP_INTERVALS;
+            _reaper = _executor.scheduleAtFixedRate(
+                this::reaper,
+                ThreadLocalRandom.current().nextLong(reapInterval),
+                reapInterval,
+                TimeUnit.MILLISECONDS);
+        }
+        if ( null == _heartbeat ) {
+            _heartbeat = _executor.scheduleAtFixedRate(
+                this::heartbeat,
+                ThreadLocalRandom.current().nextLong(HEARTBEAT_INTERVAL_MS),
+                HEARTBEAT_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
+        }
+    }
+
+    @Override
+    public MonitorInfo getMonitorInfo(String monitorId) {
+        return _monitors.getItem(monitorId);
     }
 
     @Override
@@ -117,9 +123,7 @@ public class MonitorImpl implements Monitor {
         MonitorInfoImpl monitor = null;
         MonitorInfoImpl shutdownMonitor = null;
         synchronized ( this ) {
-            if ( null == _reaper ) {
-                throw new ShuttingDownException();
-            }
+            scheduleHeartbeat();
             monitor = _activeMonitorInfo;
 
             if ( null == monitor || monitor.hasFailedHeartbeat() ) {
@@ -138,7 +142,7 @@ public class MonitorImpl implements Monitor {
             }
         }
         if ( null != shutdownMonitor && ! shutdownMonitor.isRunningInMonitoredThread() ) {
-            shutdown(shutdownMonitor);
+            shutdown(shutdownMonitor, true);
         }
         try {
             monitor.captureRunningThread();
@@ -147,7 +151,8 @@ public class MonitorImpl implements Monitor {
             if ( monitor.releaseRunningThread() &&
                  monitor.hasFailedHeartbeat() )
             {
-                shutdown(monitor);
+                // Nothing should be running, so set mayInterruptIfRunning=false
+                shutdown(monitor, false);
             }
         }
     }
@@ -161,14 +166,19 @@ public class MonitorImpl implements Monitor {
         return TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
     }
 
-    private void shutdown() {
+    @Override
+    public void shutdownMonitor(boolean mayInterruptIfRunning) {
         synchronized ( this ) {
-            if ( null == _reaper ) return;
+            _shuttingDown = true;
             _activeMonitorInfo = null;
-            _reaper.cancel(false);
-            _heartbeat.cancel(false);
-            _reaper = null;
-            _heartbeat = null;
+            if ( null != _reaper ) {
+                _reaper.cancel(false);
+                _reaper = null;
+            }
+            if ( null != _heartbeat ) {
+                _heartbeat.cancel(false);
+                _heartbeat = null;
+            }
         }
         while ( true ) {
             MonitorInfoImpl monitor = null;
@@ -178,11 +188,11 @@ public class MonitorImpl implements Monitor {
                 }
             }
             if ( null == monitor ) break;
-            shutdown(monitor);
+            shutdown(monitor, mayInterruptIfRunning);
         }
     }
 
-    private void shutdown(MonitorInfoImpl monitor) {
+    private void shutdown(MonitorInfoImpl monitor, boolean mayInterruptIfRunning) {
         monitor.forceHeartbeatFailure();
         synchronized ( this ) {
             if ( _activeMonitorInfo == monitor ) {
@@ -201,7 +211,7 @@ public class MonitorImpl implements Monitor {
             waitTime = 200;
         }
 
-        if ( ! monitor.interruptAndWaitForRunningThreads(waitTime) ) {
+        if ( ! monitor.interruptAndWaitForRunningThreads(waitTime, mayInterruptIfRunning) ) {
             String msg = "Failed to halt the following threads in "+waitTime+"ms. Halting the JVM:\n"+
                 monitor.dumpThreads();
             LOG.error(msg);
@@ -209,8 +219,24 @@ public class MonitorImpl implements Monitor {
             System.exit(-1);
         }
 
-        if ( ! monitor.hasFailedHeartbeat() ) {
+        Task task = new Task();
+        task.entityId = monitor.getMonitorId();
+        try {
+            _reapMonitorTask.run(new TaskContext() {
+                    @Override
+                    public TaskInfo getTaskInfo() {
+                        return task;
+                    }
+                    @Override
+                    public MonitorInfo getMonitorInfo() {
+                        return null;
+                    }
+                    @Override
+                    public void commitCheckpointData(byte[] checkpointData) {}
+                });
             _monitors.deleteItem(monitor.getMonitorId(), null);
+        } catch ( Throwable ex ) {
+            LOG.error("ReapMonitorTaskFailed: "+ex.getMessage(), ex);
         }
         synchronized ( this ) {
             _monitorsToShutdown.remove(monitor);
@@ -286,8 +312,7 @@ public class MonitorImpl implements Monitor {
                     LOG.error(ex.getMessage(), ex);
                 }
                 if ( null != monitor ) {
-                    monitor.forceHeartbeatFailure();
-                    shutdown(monitor);
+                    shutdown(monitor, true);
                 }
             }
         } catch ( Throwable ex ) {
