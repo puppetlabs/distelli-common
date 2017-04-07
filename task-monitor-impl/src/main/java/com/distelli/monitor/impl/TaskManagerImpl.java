@@ -1,50 +1,48 @@
 package com.distelli.monitor.impl;
 
-import java.util.Arrays;
-import java.util.HashMap;
+import com.distelli.jackson.transform.TransformModule;
 import com.distelli.monitor.Monitor;
 import com.distelli.monitor.MonitorInfo;
+import com.distelli.monitor.Sequence;
+import com.distelli.monitor.TaskBuilder;
+import com.distelli.monitor.TaskContext;
+import com.distelli.monitor.TaskFunction;
+import com.distelli.monitor.TaskInfo;
 import com.distelli.monitor.TaskManager;
 import com.distelli.monitor.TaskState;
-import com.distelli.monitor.TaskBuilder;
-import com.distelli.monitor.TaskInfo;
-import com.distelli.monitor.TaskFunction;
-import com.distelli.monitor.TaskContext;
-import java.util.Set;
-import com.distelli.persistence.PageIterator;
-import java.util.List;
-import com.distelli.persistence.TableDescription;
 import com.distelli.persistence.AttrType;
 import com.distelli.persistence.Index;
+import com.distelli.persistence.PageIterator;
+import com.distelli.persistence.TableDescription;
 import com.distelli.persistence.UpdateItemBuilder;
-import javax.persistence.RollbackException;
-import java.util.concurrent.ThreadLocalRandom;
+import com.distelli.utils.CompactUUID;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.concurrent.ConcurrentHashMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import java.util.Map;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import static com.distelli.utils.LongSortKey.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import com.distelli.jackson.transform.TransformModule;
-import java.util.Collections;
-import com.distelli.utils.CompactUUID;
-import java.io.StringWriter;
-import java.io.PrintWriter;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.inject.Inject;
-import com.distelli.monitor.Sequence;
-import com.fasterxml.jackson.core.type.TypeReference;
 import javax.inject.Singleton;
-import java.util.Collection;
+import javax.persistence.RollbackException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import static com.distelli.utils.LongSortKey.*;
 
 /**
  * If we loose DB connection or the JVM is `kill -9`ed, then tasks in these states will
@@ -110,7 +108,7 @@ public class TaskManagerImpl implements TaskManager {
                        .hashKey("id", AttrType.NUM))
                 // Query on monitor ids, or "special" state:
                 //    '#' - Runnable
-                //    '$' - Waiting on time remaining
+                //    '$' - Waiting on lock/prequisite
                 .index((idx) -> idx
                        .indexName("mid-index")
                        .hashKey("mid", AttrType.STR))
@@ -303,7 +301,7 @@ public class TaskManagerImpl implements TaskManager {
     }
 
 
-    public void releaseLocksForMonitorId(String monitorId) {
+    public void releaseLocksForMonitorId(String monitorId) throws InterruptedException {
         LOG.debug("Releasing locks for monitorId="+monitorId);
         // Release locks on the "locks" table:
         for ( PageIterator iter : new PageIterator() ) {
@@ -314,20 +312,7 @@ public class TaskManagerImpl implements TaskManager {
                 }
 
                 // Mark next task as runnable:
-                Long nextTaskId = unblockWaitingTask(lock.lockId);
-                try {
-                    // Release the lock:
-                    if ( null != nextTaskId ) {
-                        _locks.updateItem(lock.lockId, TASK_ID_NONE)
-                            .remove("mid")
-                            .remove("rtid")
-                            .when((expr) -> expr.eq("mid", monitorId));
-                    }
-                } catch ( RollbackException ex ) {
-                    LOG.debug("LostLockException: releaseLocksForMonitorId="+monitorId+" lockId="+
-                              lock.lockId+" runningTaskId="+lock.runningTaskId);
-                    continue;
-                }
+                Long nextTaskId = unblockWaitingTask(lock.lockId, monitorId);
                 if ( null != nextTaskId ) submitRunTask(nextTaskId);
             }
         }
@@ -671,7 +656,7 @@ public class TaskManagerImpl implements TaskManager {
         return taskState;
     }
 
-    private boolean acquireLocksAndPrerequisites(Task task, List<String> locksAcquired, MonitorInfo monitorInfo, AtomicReference<TaskState> finalTaskState) {
+    private boolean acquireLocksAndPrerequisites(Task task, List<String> locksAcquired, MonitorInfo monitorInfo, AtomicReference<TaskState> finalTaskState) throws InterruptedException {
         Map<String, Long> lockIdToTaskId = new HashMap<>();
         List<String> lockIds = new ArrayList<>(task.getLockIds());
         lockIds.add(getLockForTaskId(task.getTaskId()));
@@ -682,42 +667,64 @@ public class TaskManagerImpl implements TaskManager {
             lockIdToTaskId.put(lockId, prerequisiteId);
         }
         Collections.sort(lockIds);
+      NEXT_LOCK:
         for ( String lockId : lockIds ) {
-            // Enqueue:
-            String taskIdStr = longToSortKey(task.getTaskId());
-            _locks.putItem(new Lock(lockId, taskIdStr));
+          RETRY:
+            for ( int retry=0;; retry++ ) {
+                // If we retry, do a random sleep:
+                if ( retry > 0 ) Thread.sleep(ThreadLocalRandom.current().nextLong(500));
 
-            Long prerequisiteId = lockIdToTaskId.get(lockId);
-            if ( null != prerequisiteId ) {
-                if ( ! getTaskState(_tasks.getItem(prerequisiteId)).isTerminal() ) {
-                    LOG.debug("Waiting on prerequisiteTaskId="+prerequisiteId+" for taskId="+task.getTaskId());
-                    finalTaskState.set(TaskState.WAITING_FOR_PREREQUISITE);
+                // Enqueue:
+                String taskIdStr = longToSortKey(task.getTaskId());
+                _locks.putItem(new Lock(lockId, taskIdStr));
+
+                Long prerequisiteId = lockIdToTaskId.get(lockId);
+                if ( null != prerequisiteId ) {
+                    if ( ! getTaskState(_tasks.getItem(prerequisiteId)).isTerminal() ) {
+                        // Force unblockWaitingTask() to see our entry:
+                        try {
+                            _locks.updateItem(lockId, TASK_ID_NONE)
+                                .increment("agn", 1)
+                                .when((expr) -> expr.exists("mid"));
+                        } catch ( RollbackException ex ) {
+                            LOG.debug("Unable to increment agn field of lockId="+lockId+", retrying");
+                            continue RETRY;
+                        }
+                        LOG.debug("Waiting on prerequisiteTaskId="+prerequisiteId+" for taskId="+task.getTaskId());
+                        finalTaskState.set(TaskState.WAITING_FOR_PREREQUISITE);
+                        return false;
+                    }
+                    // Remove enqueue:
+                    _locks.deleteItem(lockId, taskIdStr);
+                    continue NEXT_LOCK;
+                }
+
+                // Try to acquire:
+                try {
+                    Lock lock = _locks.updateItem(lockId, TASK_ID_NONE)
+                        .set("mid", monitorInfo.getMonitorId())
+                        .set("rtid", task.getTaskId())
+                        .increment("agn", 1)
+                        .returnAllNew()
+                        .when((expr) -> expr.not(expr.exists("mid")));
+                    locksAcquired.add(lockId);
+                } catch ( RollbackException ex ) {
+                    LOG.debug("Unable to acquire lockId="+lockId+" for taskId="+task.getTaskId());
+
+                    // Force unblockWaitingTask() to see our entry:
+                    try {
+                        _locks.updateItem(lockId, TASK_ID_NONE)
+                            .increment("agn", 1)
+                            .when((expr) -> expr.exists("mid"));
+                    } catch ( RollbackException ignoredEx ) {
+                        LOG.debug("Unable to increment agn field of lockId="+lockId+", retrying");
+                        continue RETRY;
+                    }
+
+                    finalTaskState.set(TaskState.WAITING_FOR_LOCK);
                     return false;
                 }
-                // Remove enqueue:
-                _locks.deleteItem(lockId, taskIdStr);
-                continue;
-            }
-
-            // Try to acquire:
-            try {
-                Lock lock = _locks.updateItem(lockId, TASK_ID_NONE)
-                    .set("mid", monitorInfo.getMonitorId())
-                    .set("rtid", task.getTaskId())
-                    .increment("agn", 1)
-                    .returnAllNew()
-                    .when((expr) -> expr.not(expr.exists("mid")));
-                locksAcquired.add(lockId);
-            } catch ( RollbackException ex ) {
-                LOG.debug("Unable to acquire lockId="+lockId+" for taskId="+task.getTaskId());
-
-                // Failed to acquire, update "agn" to force a retry on unblockWaitingTask():
-                _locks.updateItem(lockId, TASK_ID_NONE)
-                    .increment("agn", 1)
-                    .always();
-
-                finalTaskState.set(TaskState.WAITING_FOR_LOCK);
-                return false;
+                continue NEXT_LOCK;
             }
         }
         return true;
@@ -819,7 +826,7 @@ public class TaskManagerImpl implements TaskManager {
             }
             redispatch = updateTaskStateTerminal(task, monitorInfo, taskInfo, err);
             finalTaskState.set(null);
-        } catch ( LostLockException ex ) {
+        } catch ( LostLockException|InterruptedException ex ) {
             LOG.error("Failing heartbeat "+monitorInfo.getMonitorId()+" due to taskId="+
                       taskId+": "+ex.getMessage(), ex);
             monitorInfo.forceHeartbeatFailure();
@@ -952,13 +959,13 @@ public class TaskManagerImpl implements TaskManager {
                 }
                 if ( redispatch ) submitRunTask(taskId);
                 return interrupted;
-            } catch ( RuntimeException ex ) {
+            } catch ( RuntimeException|InterruptedException ex ) {
                 if ( Thread.interrupted() || isInterruptedException(ex) ) {
                     interrupted = true;
                     LOG.debug("Interrupted in attempt to updateTaskState("+taskId+"): "+ex.getMessage(), ex);
                     continue;
                 }
-                throw ex;
+                throw (RuntimeException)ex;
             }
         }
         monitorInfo.forceHeartbeatFailure();
@@ -969,12 +976,13 @@ public class TaskManagerImpl implements TaskManager {
     private boolean isInterruptedException(Exception ex) {
         switch ( ex.getClass().getName() ) {
         case "com.amazonaws.AbortedException":
+        case "java.lang.InterruptedException":
             return true;
         }
         return false;
     }
 
-    private void releaseLocks(List<String> locks, Long taskId, MonitorInfo monitorInfo) {
+    private void releaseLocks(List<String> locks, Long taskId, MonitorInfo monitorInfo) throws InterruptedException {
         while ( ! locks.isEmpty() ) {
             String lockId = locks.get(locks.size()-1);
 
@@ -984,26 +992,17 @@ public class TaskManagerImpl implements TaskManager {
             }
 
             // Mark task as runnable:
-            Long nextTaskId = unblockWaitingTask(lockId);
-            try {
-                // Release the lock:
-                if ( null != nextTaskId ) {
-                    _locks.updateItem(lockId, TASK_ID_NONE)
-                        .remove("mid")
-                        .remove("rtid")
-                        .when((expr) -> expr.eq("mid", monitorInfo.getMonitorId()));
-                }
-            } catch ( RollbackException ex ) {
-                throw new LostLockException(taskId);
-            }
+            Long nextTaskId = unblockWaitingTask(lockId, monitorInfo.getMonitorId());
             locks.remove(locks.size()-1);
             if ( null == nextTaskId || ! _monitor.isActiveMonitor(monitorInfo) ) continue;
             submitRunTask(nextTaskId);
         }
     }
 
-    private Long unblockWaitingTask(String lockId) {
-        while ( true ) {
+    private Long unblockWaitingTask(String lockId, String monitorId) throws InterruptedException {
+        for ( int retry=0;; retry++ ) {
+            // If we retry, do a random sleep:
+            if ( retry > 0 ) Thread.sleep(ThreadLocalRandom.current().nextLong(500));
             Long tasksQueued = null;
             for ( PageIterator iter : new PageIterator().pageSize(2) ) {
                 for ( Lock lock : _locks.queryItems(lockId, iter).list() ) {
@@ -1020,6 +1019,12 @@ public class TaskManagerImpl implements TaskManager {
                     } catch ( RollbackException ex ) {
                         LOG.debug("taskId="+taskId+" was unable to set task as queued");
                         continue;
+                    }
+                    try {
+                        _locks.deleteItem(lockId, TASK_ID_NONE,
+                                          (expr) -> expr.eq("mid", monitorId));
+                    } catch ( RollbackException ex ) {
+                        throw new LostLockException(taskId);
                     }
                     return taskId;
                 }

@@ -5,8 +5,11 @@ import com.distelli.monitor.TaskContext;
 import com.distelli.monitor.TaskFunction;
 import com.distelli.monitor.TaskInfo;
 import javax.inject.Inject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ReapMonitorTask implements TaskFunction {
+    private static final Logger LOG = LoggerFactory.getLogger(ReapMonitorTask.class);
     public static String ENTITY_TYPE = "gc:monitor";
 
     @Inject
@@ -18,7 +21,15 @@ public class ReapMonitorTask implements TaskFunction {
     @Override
     public TaskInfo run(TaskContext ctx) {
         String monitorId = ctx.getTaskInfo().getEntityId();
-        _taskManager.releaseLocksForMonitorId(monitorId);
+        try {
+            _taskManager.releaseLocksForMonitorId(monitorId);
+        } catch ( Throwable ex ) {
+            LOG.error("ReapMonitorTaskFailed: "+ex.getCause(), ex);
+            // Be sure to retry this in another minute:
+            return ctx.getTaskInfo().toBuilder()
+                .millisecondsRemaining(60000)
+                .build();
+        }
         return null;
     }
 

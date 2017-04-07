@@ -222,19 +222,22 @@ public class MonitorImpl implements Monitor {
         Task task = new Task();
         task.entityId = monitor.getMonitorId();
         try {
-            _reapMonitorTask.run(new TaskContext() {
+            // Try to run the reaper inline so we can keep the DB tidy:
+            TaskInfo taskInfo = _reapMonitorTask.run(new TaskContext() {
                     @Override
                     public TaskInfo getTaskInfo() {
                         return task;
                     }
                     @Override
                     public MonitorInfo getMonitorInfo() {
-                        return null;
+                        return monitor;
                     }
                     @Override
                     public void commitCheckpointData(byte[] checkpointData) {}
                 });
-            _monitors.deleteItem(monitor.getMonitorId(), null);
+            if ( null == taskInfo ) {
+                _monitors.deleteItem(monitor.getMonitorId(), null);
+            } // else: let the reaper take care of it...
         } catch ( Throwable ex ) {
             LOG.error("ReapMonitorTaskFailed: "+ex.getMessage(), ex);
         }

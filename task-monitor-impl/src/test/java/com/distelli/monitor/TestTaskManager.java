@@ -146,6 +146,12 @@ public class TestTaskManager {
     @Before
     public void beforeTest() {
         INJECTOR.injectMembers(this);
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+                @Override
+                public void run() {
+                    _monitor.shutdownMonitor(false);
+                }
+            });
     }
 
     @Test

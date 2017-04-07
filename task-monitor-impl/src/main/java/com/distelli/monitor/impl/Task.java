@@ -145,7 +145,7 @@ public class Task implements TaskInfo {
             +",prerequisiteTaskIds="+prerequisiteTaskIds
             +",monitorId="+monitorId
             +",checkpointData="+printBase64Binary(null == checkpointData ? new byte[0] : checkpointData)
-            +",errorMessage=="+errorMessage
+            +",errorMessage="+errorMessage
             +",errorId="+errorId
             +",errorMessageStackTrace="+errorMessageStackTrace
             +",startTime="+startTime
