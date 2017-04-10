@@ -12,11 +12,8 @@ import javax.servlet.DispatcherType;
 import javax.servlet.http.HttpServlet;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.server.SessionManager;
 import org.eclipse.jetty.server.handler.AllowSymLinkAliasChecker;
 import org.eclipse.jetty.server.handler.ErrorHandler;
-import org.eclipse.jetty.server.session.HashSessionManager;
-import org.eclipse.jetty.server.session.SessionHandler;
 import org.eclipse.jetty.servlet.DefaultServlet;
 import org.eclipse.jetty.servlet.ErrorPageErrorHandler;
 import org.eclipse.jetty.servlet.FilterHolder;
@@ -100,7 +97,7 @@ public class GuiceWebServer implements Runnable {
         staticHolder.setInitParameter("gzip", "true");
         staticHolder.setInitParameter("aliases", "true");
         staticHolder.setInitParameter("cacheControl", "max-age=3600");
-        context.addServlet(staticHolder, "");
+        context.addServlet(staticHolder, "/3C12AAD8-C66A-466C-8CD4-E6E6232315E7");
 
         for ( GenericFilter filter : filters ) {
             LOG.debug("Adding filter="+filter);

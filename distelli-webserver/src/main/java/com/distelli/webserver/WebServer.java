@@ -4,9 +4,6 @@ import java.util.Map;
 import java.util.HashMap;
 import javax.servlet.http.HttpServlet;
 import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.SessionManager;
-import org.eclipse.jetty.server.session.HashSessionManager;
-import org.eclipse.jetty.server.session.SessionHandler;
 import org.eclipse.jetty.servlet.DefaultServlet;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -24,7 +21,6 @@ public class WebServer implements Runnable
     private Map<String, WebServlet> _webServlets = null;
     private Map<String, ServletHolder> _standardServlets = null;
     private String _path = null;
-    private int _sessionMaxAge = 2592000; //default is 30 days
     private ErrorHandler _errorHandler = null;
     private Integer _sslPort;
     private SslContextFactory _sslContextFactory;
@@ -46,11 +42,6 @@ public class WebServer implements Runnable
         }
         _sslPort = sslPort;
         _sslContextFactory = sslContextFactory;
-    }
-
-    public void setSessionMaxAge(int sessionMaxAge)
-    {
-        _sessionMaxAge = sessionMaxAge;
     }
 
     public void addWebServlet(String path, WebServlet webServlet)
@@ -85,11 +76,8 @@ public class WebServer implements Runnable
                 server.addConnector(connector);
             }
 
-            ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
-            SessionManager sessionManager = new HashSessionManager();
-            context.setSessionHandler(new SessionHandler(sessionManager));
+            ServletContextHandler context = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
             context.setContextPath(_path);
-            context.setInitParameter("org.eclipse.jetty.servlet.MaxAge", ""+_sessionMaxAge);
             server.setHandler(context);
 
             ServletHolder servletHolder = new ServletHolder(_appServlet);
