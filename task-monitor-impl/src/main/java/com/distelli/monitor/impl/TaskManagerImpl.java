@@ -372,7 +372,7 @@ public class TaskManagerImpl implements TaskManager {
             .withNoEncrypt(noEncrypt)
             .build();
 
-        noEncrypt = new String[]{"mid", "agn"};
+        noEncrypt = new String[]{"mid", "agn", "rtid"};
         _locks = indexFactory.create(Lock.class)
             .withNoEncrypt(noEncrypt)
             .withTableDescription(LocksTable.getTableDescription())
@@ -723,7 +723,7 @@ public class TaskManagerImpl implements TaskManager {
                         .increment("agn", 1)
                         .returnAllNew()
                         .when((expr) -> expr.or(
-                                  expr.eq("mid", monitorId),
+                                  expr.eq("rtid", task.getTaskId()),
                                   expr.not(expr.exists("mid"))));
                     locksAcquired.add(lockId);
                 } catch ( RollbackException ex1 ) {
@@ -1043,7 +1043,15 @@ public class TaskManagerImpl implements TaskManager {
         throws InterruptedException
     {
         if ( lockId.startsWith("_TASK:") ) {
-            if ( ! processPrereqs ) return;
+            if ( ! processPrereqs ) {
+                // We still need to release the lock:
+                try {
+                    _locks.deleteItem(lockId, TASK_ID_NONE, (expr) -> expr.eq("mid", monitorId));
+                } catch ( RollbackException ex ) {
+                    throw new LostLockException("lockId="+lockId);
+                }
+                return;
+            }
         } else {
             processPrereqs = false;
         }
@@ -1068,7 +1076,7 @@ public class TaskManagerImpl implements TaskManager {
                         continue;
                     }
                     taskIdsToRun.add(taskId);
-                    // Just unblocking a single taskk
+                    // Just unblocking a single task
                     if ( ! processPrereqs ) break;
                 }
             }
