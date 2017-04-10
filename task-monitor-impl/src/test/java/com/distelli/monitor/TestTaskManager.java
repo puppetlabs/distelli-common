@@ -28,7 +28,9 @@ import static org.junit.Assert.*;
 import com.distelli.utils.Log4JConfigurator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.junit.Ignore;
 
+@Ignore
 public class TestTaskManager {
     private static final Logger LOG = LoggerFactory.getLogger(TestTaskManager.class);
     private static PersistenceModule getPersistenceModule() {
