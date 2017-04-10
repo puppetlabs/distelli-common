@@ -27,23 +27,23 @@ public class Task implements TaskInfo {
     public String canceledBy;
 
     public Task() {}
-    public Task(Task src) {
-        taskId = src.taskId;
-        entityType = src.entityType;
-        entityId = src.entityId;
-        taskState = src.taskState;
-        lockIds = src.lockIds;
-        prerequisiteTaskIds = src.prerequisiteTaskIds;
-        monitorId = src.monitorId;
-        checkpointData = src.checkpointData;
-        errorMessage = src.errorMessage;
-        errorId = src.errorId;
-        errorMessageStackTrace = src.errorMessageStackTrace;
-        startTime = src.startTime;
-        endTime = src.endTime;
-        runCount = src.runCount;
-        millisecondsRemaining = src.millisecondsRemaining;
-        canceledBy = src.canceledBy;
+    public Task(TaskInfo src) {
+        taskId = src.getTaskId();
+        entityType = src.getEntityType();
+        entityId = src.getEntityId();
+        taskState = src.getTaskState();
+        lockIds = src.getLockIds();
+        prerequisiteTaskIds = src.getPrerequisiteTaskIds();
+        monitorId = src.getMonitorId();
+        checkpointData = src.getCheckpointData();
+        errorMessage = src.getErrorMessage();
+        errorId = src.getErrorId();
+        errorMessageStackTrace = src.getErrorStackTrace();
+        startTime = src.getStartTime();
+        endTime = src.getEndTime();
+        runCount = src.getRunCount();
+        millisecondsRemaining = src.getMillisecondsRemaining();
+        canceledBy = src.getCanceledBy();
     }
 
     @Override

@@ -28,9 +28,7 @@ import static org.junit.Assert.*;
 import com.distelli.utils.Log4JConfigurator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.junit.Ignore;
 
-@Ignore
 public class TestTaskManager {
     private static final Logger LOG = LoggerFactory.getLogger(TestTaskManager.class);
     private static PersistenceModule getPersistenceModule() {
@@ -95,6 +93,7 @@ public class TestTaskManager {
         public CountDownLatch _latch = null;
         public List<Long> _tasksRan = null;
         public String _monitorIdFailed = null;
+        public boolean _failMonitor = false;
 
         @Override
         public TaskInfo run(TaskContext ctx) throws Exception {
@@ -131,6 +130,7 @@ public class TestTaskManager {
         }
 
         public TaskInfo testFailedMonitor(TaskContext ctx) throws Exception {
+            if ( ! _failMonitor ) return null;
             LOG.info("Testing a force heartbeat failure");
             _monitorIdFailed = ctx.getMonitorInfo().getMonitorId();
             ctx.getMonitorInfo().forceHeartbeatFailure();
@@ -239,6 +239,7 @@ public class TestTaskManager {
 
         CountDownLatch latch = new CountDownLatch(1);
         _testTask._latch = latch;
+        _testTask._failMonitor = true;
 
         TaskInfo task = _taskManager.createTask()
             .entityType(TestTask.ENTITY_TYPE)
@@ -250,13 +251,14 @@ public class TestTaskManager {
         latch.await();
         _taskManager.stopTaskQueueMonitor(false);
 
-        // Should still report success:
-        assertEquals(_taskManager.getTask(task.getTaskId()).getTaskState(), TaskState.SUCCESS);
+        // Aborted, so from the outside it appears to be running:
+        assertEquals(TaskState.RUNNING, _taskManager.getTask(task.getTaskId()).getTaskState());
 
         // but the "_BROKE" lock should still be around, preventing other tasks from running
-        // until it is cleaned-up:
-        latch = new CountDownLatch(1);
+        // until it is cleaned-up. Task that failed the monitor should be ran again.
+        latch = new CountDownLatch(2);
         _testTask._latch = latch;
+        _testTask._failMonitor = false;
 
         task = _taskManager.createTask()
             .entityType(TestTask.ENTITY_TYPE)
