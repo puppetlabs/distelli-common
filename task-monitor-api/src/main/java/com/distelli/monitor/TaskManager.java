@@ -22,6 +22,18 @@ public interface TaskManager {
     /**
      * @param entityType of tasks to query for.
      *
+     * @param entityIdBeginsWith the prefix of the entity id to search for.
+     *
+     * @param iter used for iterating over all tasks.
+     *
+     * @return the list of tasks.
+     */
+    public List<? extends TaskInfo> getTasksByEntityType(
+        String entityType, String entityIdBeginsWith, PageIterator iter);
+
+    /**
+     * @param entityType of tasks to query for.
+     *
      * @param taskIdBeginsWith is what the task id must begin with.
      *
      * @param iter used for iterating over all tasks.

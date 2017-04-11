@@ -149,7 +149,19 @@ public class TaskManagerImpl implements TaskManager {
 
     @Override
     public List<? extends TaskInfo> getTasksByEntityType(String entityType, PageIterator iter) {
-        return _tasksForEntity.queryItems(entityType, iter).list();
+        return getTasksByEntityType(entityType, null, iter);
+    }
+
+    @Override
+    public List<? extends TaskInfo> getTasksByEntityType(
+        String entityType, String entityIdBeginsWith, PageIterator iter)
+    {
+        if ( null == entityIdBeginsWith || "".equals(entityIdBeginsWith) ) {
+            return _tasksForEntity.queryItems(entityType, iter).list();
+        }
+        return _tasksForEntity.queryItems(entityType, iter)
+            .beginsWith(entityIdBeginsWith)
+            .list();
     }
 
     @Override
@@ -680,8 +692,9 @@ public class TaskManagerImpl implements TaskManager {
             }
             // Enqueue:
             _locks.putItem(new Lock(lockId, taskIdSortKey));
+            LOG.debug("enqueue prerequisite="+prerequisiteId+" for taskId="+task.getTaskId());
             try {
-                // Force unblockWaitingTask() to see our entry:
+                // Force unblockWaitingTasks() to see our entry:
                 _locks.updateItem(lockId, TASK_ID_NONE)
                     .increment("agn", 1)
                     .when((expr) -> expr.exists("mid"));
@@ -733,7 +746,7 @@ public class TaskManagerImpl implements TaskManager {
                     String taskIdStr = longToSortKey(task.getTaskId());
                     _locks.putItem(new Lock(lockId, taskIdStr));
 
-                    // Force unblockWaitingTask() to see our entry:
+                    // Force unblockWaitingTasks() to see our entry:
                     try {
                         _locks.updateItem(lockId, TASK_ID_NONE)
                             .increment("agn", 1)
@@ -896,16 +909,25 @@ public class TaskManagerImpl implements TaskManager {
             try {
                 // First update all DB state:
                 UpdateItemBuilder update = buildUpdateTaskState(originalTask, finalTask);
-                releaseLocks(locksAcquired,
-                             taskId,
-                             monitorInfo.getMonitorId(),
-                             taskIdsToRun,
-                             finalTask.getTaskState().isTerminal());
+
+                // We MUST commit any terminal states of the task BEFORE the
+                // prereqs lock is processed, otherwise this log line:
+                // "Unable to increment agn field of lockId="... in
+                // acquireLocks() will do a double-check of the task state only
+                // to find the task still is not in a terminal state and
+                // therefore the code will assume the enqueue of the prereq was
+                // successful.
                 try {
                     update.when((expr) -> expr.eq("mid", monitorInfo.getMonitorId()));
                 } catch ( RollbackException rollbackEx ) {
                     throw new LostLockException("taskId="+originalTask.getTaskId());
                 }
+
+                releaseLocks(locksAcquired,
+                             taskId,
+                             monitorInfo.getMonitorId(),
+                             taskIdsToRun,
+                             finalTask.getTaskState().isTerminal());
 
                 // Get the tasks to run immediately:
                 if ( _monitor.isActiveMonitor(monitorInfo) ) {
@@ -1047,11 +1069,13 @@ public class TaskManagerImpl implements TaskManager {
                 // We still need to release the lock:
                 try {
                     _locks.deleteItem(lockId, TASK_ID_NONE, (expr) -> expr.eq("mid", monitorId));
+                    LOG.debug("released lockId="+lockId);
                 } catch ( RollbackException ex ) {
                     throw new LostLockException("lockId="+lockId);
                 }
                 return;
             }
+            LOG.debug("unblocking all prerequisites lockId="+lockId);
         } else {
             processPrereqs = false;
         }
@@ -1071,6 +1095,7 @@ public class TaskManagerImpl implements TaskManager {
                             .set("mid", AttrType.STR, MONITOR_ID_QUEUED)
                             .set("stat", AttrType.STR, toString(TaskState.QUEUED))
                             .when((expr) -> expr.eq("mid", MONITOR_ID_WAITING));
+                        LOG.debug("unblocked taskId="+taskId+" that was waiting for "+lockId);
                     } catch ( RollbackException ex ) {
                         LOG.debug("taskId="+taskId+" was not in a waiting state");
                         continue;
@@ -1080,12 +1105,16 @@ public class TaskManagerImpl implements TaskManager {
                     if ( ! processPrereqs ) break;
                 }
             }
-            if ( null == tasksQueued ) return;
+            if ( null == tasksQueued ) {
+                LOG.error("Expected lockId="+lockId+" to exist!");
+                return;
+            }
             try {
                 Long finalTasksQueued = tasksQueued;
                 _locks.deleteItem(lockId, TASK_ID_NONE, (expr) -> expr.and(
                                       expr.eq("mid", monitorId),
                                       expr.eq("agn", finalTasksQueued)));
+                LOG.debug("released lockId="+lockId);
             } catch ( RollbackException ex ) {
                 Lock lock = _locks.getItem(lockId, TASK_ID_NONE);
                 if ( null == lock || ! monitorId.equals(lock.monitorId) ) {
