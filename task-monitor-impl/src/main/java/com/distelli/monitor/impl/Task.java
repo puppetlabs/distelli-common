@@ -15,6 +15,7 @@ public class Task implements TaskInfo {
     public TaskState taskState;
     public Set<String> lockIds;
     public Set<Long> prerequisiteTaskIds;
+    public boolean anyPrerequisiteTaskId = false;
     public String monitorId;
     public byte[] checkpointData;
     public String errorMessage;
@@ -34,6 +35,7 @@ public class Task implements TaskInfo {
         taskState = src.getTaskState();
         lockIds = src.getLockIds();
         prerequisiteTaskIds = src.getPrerequisiteTaskIds();
+        anyPrerequisiteTaskId = src.isAnyPrerequisiteTaskId();
         monitorId = src.getMonitorId();
         checkpointData = src.getCheckpointData();
         errorMessage = src.getErrorMessage();
@@ -76,6 +78,11 @@ public class Task implements TaskInfo {
     public Set<Long> getPrerequisiteTaskIds() {
         if ( null == prerequisiteTaskIds ) return Collections.emptySet();
         return Collections.unmodifiableSet(prerequisiteTaskIds);
+    }
+
+    @Override
+    public boolean isAnyPrerequisiteTaskId() {
+        return anyPrerequisiteTaskId;
     }
 
     @Override
@@ -143,6 +150,7 @@ public class Task implements TaskInfo {
             +",taskState="+taskState
             +",lockIds="+lockIds
             +",prerequisiteTaskIds="+prerequisiteTaskIds
+            +",anyPrerequisiteTaskId="+anyPrerequisiteTaskId
             +",monitorId="+monitorId
             +",checkpointData="+printBase64Binary(null == checkpointData ? new byte[0] : checkpointData)
             +",errorMessage="+errorMessage

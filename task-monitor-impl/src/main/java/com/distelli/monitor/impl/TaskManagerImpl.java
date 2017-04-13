@@ -408,6 +408,7 @@ public class TaskManagerImpl implements TaskManager {
             .put("stat", String.class, TaskManagerImpl::toState, TaskManagerImpl::fromState)
             .put("lids", new TypeReference<Set<String>>(){}, "lockIds")
             .put("preq", new TypeReference<Set<Long>>(){}, "prerequisiteTaskIds")
+            .put("any", Boolean.class, "anyPrerequisiteTaskId")
             .put("mid", String.class, "monitorId")
             .put("st8", byte[].class, "checkpointData")
             .put("err", String.class, "errorMessage")
@@ -679,15 +680,26 @@ public class TaskManagerImpl implements TaskManager {
     }
 
     private boolean checkPrerequisites(Task task) {
+        boolean anyPrerequisiteComplete = false;
+        List<Long> incompletePrerequisites = ( task.isAnyPrerequisiteTaskId() ) ?
+            new ArrayList<>() : null;
         // First check the prerequisites:
         for ( Long prerequisiteId : task.getPrerequisiteTaskIds() ) {
             if ( null == prerequisiteId ) continue;
             String lockId = getLockForTaskId(prerequisiteId);
             String taskIdSortKey = longToSortKey(task.getTaskId());
+            if ( anyPrerequisiteComplete ) {
+                // Avoid cruft buildup:
+                _locks.deleteItem(lockId, taskIdSortKey);
+                continue;
+            }
             TaskState state = getTaskState(_tasks.getItem(prerequisiteId));
             if ( state.isTerminal() ) {
                 // Task completed, avoid leaving cruft:
                 _locks.deleteItem(lockId, taskIdSortKey);
+                if ( null != incompletePrerequisites ) {
+                    anyPrerequisiteComplete = true;
+                }
                 continue;
             }
             // Enqueue:
@@ -704,13 +716,34 @@ public class TaskManagerImpl implements TaskManager {
                 if ( state.isTerminal() ) {
                     // Task completed (and removed the lockId, TASK_ID_NONE field):
                     _locks.deleteItem(lockId, taskIdSortKey);
+                    if ( null != incompletePrerequisites ) {
+                        anyPrerequisiteComplete = true;
+                    }
                     continue;
                 }
                 // Task isn't running, we have already enqueued, so we are good.
             }
-            LOG.debug("Waiting on prerequisiteTaskId="+prerequisiteId+" for taskId="+task.getTaskId());
-            task.taskState = TaskState.WAITING_FOR_PREREQUISITE;
-            return false;
+            if ( null != incompletePrerequisites ) {
+                incompletePrerequisites.add(prerequisiteId);
+            } else {
+                LOG.debug("Waiting on prerequisiteTaskId="+prerequisiteId+" for taskId="+task.getTaskId());
+                task.taskState = TaskState.WAITING_FOR_PREREQUISITE;
+                return false;
+            }
+        }
+        if ( null != incompletePrerequisites ) {
+            if ( ! anyPrerequisiteComplete ) {
+                LOG.debug("Waiting on one of the prerequisiteTaskIds="+incompletePrerequisites+
+                          " for taskId="+task.getTaskId());
+                task.taskState = TaskState.WAITING_FOR_PREREQUISITE;
+                return false;
+            }
+            // Avoid cruft buildup:
+            for ( Long prerequisiteId : incompletePrerequisites ) {
+                String lockId = getLockForTaskId(prerequisiteId);
+                String taskIdSortKey = longToSortKey(task.getTaskId());
+                _locks.deleteItem(lockId, taskIdSortKey);
+            }
         }
         return true;
     }
@@ -991,10 +1024,12 @@ public class TaskManagerImpl implements TaskManager {
                 finalTask.monitorId = MONITOR_ID_QUEUED;
                 finalTask.taskState = TaskState.QUEUED;
                 if ( finalTask.getPrerequisiteTaskIds().isEmpty() ) {
-                    update.remove("preq");
+                    update.remove("preq")
+                        .remove("any");
                     logMsg.append(" remove preq");
                 } else {
-                    update.set("preq", AttrType.STR_SET, finalTask.getPrerequisiteTaskIds());
+                    update.set("preq", AttrType.STR_SET, finalTask.getPrerequisiteTaskIds())
+                        .set("any", AttrType.BOOL, finalTask.isAnyPrerequisiteTaskId());
                     logMsg.append(" set preq="+finalTask.getPrerequisiteTaskIds());
                 }
             }

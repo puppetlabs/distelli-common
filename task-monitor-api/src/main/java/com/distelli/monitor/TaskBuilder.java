@@ -57,6 +57,15 @@ public interface TaskBuilder {
      */
     public TaskBuilder prerequisiteTaskIds(Collection<Long> prerequisiteTaskIds);
     /**
+     * @param anyPrerequisiteTaskId when set to true will cause the task to
+     *     be eligible for a run once ANY of the prerequisite tasks are in a
+     *     terminal state. Otherwise, the task will not run until ALL the
+     *     prerequisite task ids are in a terminal state.
+     *
+     * @return this for method chaining.
+     */
+    public TaskBuilder anyPrerequisiteTaskId(boolean anyPrerequisiteTaskId);
+    /**
      * @param millisecondsRemaining the number of milliseconds which must
      *        elapse for this task runs (again).
      *

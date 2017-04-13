@@ -50,6 +50,12 @@ public interface TaskInfo {
     public Set<Long> getPrerequisiteTaskIds();
 
     /**
+     * @return true if the task is ran when any prerequisite task is in
+     *     a terminal state.
+     */
+    public boolean isAnyPrerequisiteTaskId();
+
+    /**
      * @return the monitor id locked to this task, or null if this task
      *     is in a terminal state. Note that a few "special" monitor ids
      *     exist to indicate that a task is ready to be ran or is

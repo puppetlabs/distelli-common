@@ -28,8 +28,14 @@ import static org.junit.Assert.*;
 import com.distelli.utils.Log4JConfigurator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import java.util.Collections;
+import java.util.Arrays;
+import java.util.HashSet;
 
 public class TestTaskManager {
+    private static final ObjectMapper OM = new ObjectMapper();
     private static final Logger LOG = LoggerFactory.getLogger(TestTaskManager.class);
     private static PersistenceModule getPersistenceModule() {
         String fileName = System.getenv("TEST_PERSISTENCE_CONFIG");
@@ -106,17 +112,26 @@ public class TestTaskManager {
         }
 
         public TaskInfo testNoop(TaskContext ctx) throws Exception {
+            if ( null != _tasksRan ) _tasksRan.add(ctx.getTaskInfo().getTaskId());
             return null;
         }
 
         public TaskInfo testPrerequisite(TaskContext ctx) throws Exception {
-            Set<Long> prerequisisteTaskIds = ctx.getTaskInfo().getPrerequisiteTaskIds();
-            Long taskId = ( prerequisisteTaskIds.isEmpty() ) ? null : prerequisisteTaskIds.iterator().next();
-            if ( null != taskId ) {
-                assertEquals(_taskManager.getTask(taskId)
-                             .getTaskState(), TaskState.SUCCESS);
+            if ( null != _tasksRan ) _tasksRan.add(ctx.getTaskInfo().getTaskId());
+            Set<Long> expectedPrerequisites = OM.readValue(ctx.getTaskInfo().getCheckpointData(),
+                                                           new TypeReference<Set<Long>>(){});
+            for ( Long taskId : ctx.getTaskInfo().getPrerequisiteTaskIds() ) {
+                // If this is not in the expectedPrerequisites, then
+                // we don't care if that task is in a terminal state.
+                if ( ! expectedPrerequisites.remove(taskId) ) continue;
+                assertEquals(
+                    "taskId="+taskId,
+                    TaskState.SUCCESS,
+                    _taskManager.getTask(taskId).getTaskState());
             }
-            _tasksRan.add(ctx.getTaskInfo().getTaskId());
+            if ( ! expectedPrerequisites.isEmpty() ) {
+                fail("Expected prerequisiteTaskIds="+expectedPrerequisites);
+            }
             return null;
         }
 
@@ -126,6 +141,12 @@ public class TestTaskManager {
             return ctx.getTaskInfo().toBuilder()
                 .millisecondsRemaining(200)
                 .checkpointData((""+remaining).getBytes())
+                .build();
+        }
+
+        public TaskInfo testDelayedForever(TaskContext ctx) throws Exception {
+            return ctx.getTaskInfo().toBuilder()
+                .millisecondsRemaining(60*5*1000)
                 .build();
         }
 
@@ -166,10 +187,13 @@ public class TestTaskManager {
         _testTask._tasksRan = new ArrayList<>();
         List<Long> taskIds = new ArrayList<>();
         for ( int i=0; i < taskCount; i++ ) {
+            Set<Long> prereqs = ( null == lastTask ) ?
+                Collections.emptySet() : Collections.singleton(lastTask.getTaskId());
             lastTask = _taskManager.createTask()
                 .entityType(TestTask.ENTITY_TYPE)
                 .entityId("testPrerequisite")
-                .prerequisiteTaskIds(null == lastTask ? null : lastTask.getTaskId())
+                .checkpointData(OM.writeValueAsBytes(prereqs))
+                .prerequisiteTaskIds(prereqs)
                 .build();
             _taskManager.addTask(lastTask);
             taskIds.add(lastTask.getTaskId());
@@ -180,6 +204,63 @@ public class TestTaskManager {
         for ( Long taskId : taskIds ) {
             TaskInfo task = _taskManager.getTask(taskId);
             assertEquals(task.getTaskState(), TaskState.SUCCESS);
+        }
+    }
+
+    // Run 5 forever tasks + 1 noop <-- prereq task.
+    @Test
+    public void testAnyPrerequisite() throws Exception {
+        final int foreverTaskCount = 5;
+        _taskManager.monitorTaskQueue();
+        CountDownLatch latch = new CountDownLatch(foreverTaskCount + 2);
+        _testTask._latch = latch;
+        _testTask._tasksRan = new ArrayList<>();
+        List<Long> taskIds = new ArrayList<>();
+        try {
+            // Start the forever Tasks:
+            for ( int i=0; i < foreverTaskCount; i++ ) {
+                TaskInfo task = _taskManager.createTask()
+                    .entityType(TestTask.ENTITY_TYPE)
+                    .entityId("testDelayedForever")
+                    .build();
+                _taskManager.addTask(task);
+                taskIds.add(task.getTaskId());
+            }
+            // Create the noop task:
+            TaskInfo noopTask = _taskManager.createTask()
+                .entityType(TestTask.ENTITY_TYPE)
+                .entityId("testNoop")
+                .build();
+            taskIds.add(noopTask.getTaskId());
+            // Create the prerequisite task:
+            TaskInfo prereqTask = _taskManager.createTask()
+                .entityType(TestTask.ENTITY_TYPE)
+                .entityId("testPrerequisite")
+                // Only the noop task should be terminal:
+                .checkpointData(OM.writeValueAsBytes(
+                                    Collections.singleton(noopTask.getTaskId())))
+                .prerequisiteTaskIds(taskIds)
+                .anyPrerequisiteTaskId(true)
+                .build();
+            taskIds.add(prereqTask.getTaskId());
+            _taskManager.addTask(prereqTask);
+            _taskManager.addTask(noopTask);
+            latch.await();
+            _taskManager.stopTaskQueueMonitor(false);
+            List<Long> tasksThatShouldHaveRan =
+                Arrays.asList(prereqTask.getTaskId(), noopTask.getTaskId());
+            assertEquals(
+                new HashSet<>(_testTask._tasksRan),
+                new HashSet<>(tasksThatShouldHaveRan));
+            for ( Long taskId : tasksThatShouldHaveRan ) {
+                TaskInfo task = _taskManager.getTask(taskId);
+                assertEquals(task.getTaskState(), TaskState.SUCCESS);
+            }
+        } finally {
+            // Cleanup:
+            for ( Long taskId : taskIds ) {
+                _taskManager.deleteTask(taskId);
+            }
         }
     }
 

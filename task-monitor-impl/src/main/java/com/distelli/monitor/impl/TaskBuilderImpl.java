@@ -67,6 +67,12 @@ public class TaskBuilderImpl implements TaskBuilder {
     }
 
     @Override
+    public TaskBuilder anyPrerequisiteTaskId(boolean anyPrerequisiteTaskId) {
+        proto.anyPrerequisiteTaskId = anyPrerequisiteTaskId;
+        return this;
+    }
+
+    @Override
     public TaskBuilder millisecondsRemaining(long millisecondsRemaining) {
         proto.millisecondsRemaining = millisecondsRemaining;
         return this;
