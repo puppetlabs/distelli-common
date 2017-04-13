@@ -35,7 +35,6 @@ public class RequestContext
     protected String _remoteUser = null;
     protected String _requestId = null;
     protected int _contentLength = 0;
-    protected HttpSession _httpSession = null;
     protected InputStream _requestStream = null;
     protected JsonNode _jsonContent = null;
     protected Cookie _sessionCookie = null;
@@ -72,7 +71,6 @@ public class RequestContext
         _requestId = _headers.get(WebConstants.REQUEST_ID_HEADER);
         if(_requestId == null)
             _requestId = UUID.randomUUID().toString();
-        _httpSession = request.getSession();
         if(!unmarshallJson(request))
         {
             try {
@@ -362,11 +360,6 @@ public class RequestContext
     public InputStream getRequestStream()
     {
         return _requestStream;
-    }
-
-    public HttpSession getSession()
-    {
-        return _httpSession;
     }
 
     public JsonNode getJsonContent()

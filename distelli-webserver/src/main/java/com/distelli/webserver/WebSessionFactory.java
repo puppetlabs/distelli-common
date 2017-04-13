@@ -142,12 +142,6 @@ public abstract class WebSessionFactory<R extends RequestContext>
         Cookie[] cookies = requestContext.getCookies();
         if(cookies == null)
             return null;
-        HttpSession httpSession = requestContext.getSession();
-        if(httpSession == null)
-            return null;
-        String sessionId = httpSession.getId();
-        if(sessionId == null)
-            return null;
         //check for null cookies
         Cookie sessionCookie = null;
         for(Cookie cookie : cookies)
