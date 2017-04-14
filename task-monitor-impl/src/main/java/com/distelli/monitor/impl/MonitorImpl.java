@@ -233,6 +233,10 @@ public class MonitorImpl implements Monitor {
                         return monitor;
                     }
                     @Override
+                    public byte[] getUpdateData() {
+                        return null;
+                    }
+                    @Override
                     public void commitCheckpointData(byte[] checkpointData) {}
                 });
             if ( null == taskInfo ) {

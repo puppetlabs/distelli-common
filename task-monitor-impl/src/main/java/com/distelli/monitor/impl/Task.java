@@ -18,6 +18,7 @@ public class Task implements TaskInfo {
     public boolean anyPrerequisiteTaskId = false;
     public String monitorId;
     public byte[] checkpointData;
+    public byte[] updateData;
     public String errorMessage;
     public String errorId;
     public String errorMessageStackTrace;

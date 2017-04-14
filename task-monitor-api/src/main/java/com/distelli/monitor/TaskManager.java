@@ -91,7 +91,11 @@ public interface TaskManager {
     /**
      * Indicate that a task is desired to be canceled. Cancelation does not
      * currently interrupt a running task. This API call is ignored if the
-     * task is in a terminal state or if the task does not exist.
+     * task is in a terminal state or if the task does not exist. Note that
+     * cancelled tasks will never run again. To implement custom cancellation
+     * code, you probably will want to use the updateTask() API call with
+     * updateData that indicates you want the task to be cancelled the next
+     * time the task is ran.
      *
      * @param canceledBy a string used to record who or why a task was
      *     canceled. The `TaskInfo.getCanceledBy()` method will return
@@ -100,6 +104,23 @@ public interface TaskManager {
      * @param taskId is the identifier of the task to cancel.
      */
     public void cancelTask(String canceledBy, long taskId);
+
+    /**
+     * The next time the task is ran, the TaskContext.getUpdateData() will
+     * contain the specified bytes. If this call is made several times
+     * before the task is ran, then the last call wins.
+     *
+     * NOTE: The task will run even regardless of if prerequisites, locks,
+     * and/or timeout expiration. Depending on what sort of task your
+     * implementing, this could cause problems!
+     *
+     * @param updateData is the extra data to run the task with.
+     *
+     * @param taskId is the identifier of the task to run with specified
+     *    update data. If the task is in a terminal state this API
+     *    call is ignored.
+     */
+    public void updateTask(byte[] updateData, long taskId);
 
     /**
      * Start monitoring for tasks in the current JVM. If we are already

@@ -313,6 +313,27 @@ public class TaskManagerImpl implements TaskManager {
         }
     }
 
+    @Override
+    public void updateTask(byte[] updateData, long taskId) {
+        if ( null == updateData ) throw new IllegalArgumentException("updateData may not be null");
+        try {
+            _tasks.updateItem(taskId, null)
+                .set("upd", AttrType.BIN, updateData)
+                .when((expr) -> expr.exists("mid"));
+        } catch ( RollbackException ex ) {
+            LOG.debug("Attempt to set updateData on taskId="+taskId+" that is in a final state, ignoring");
+            return;
+        }
+        try {
+            _tasks.updateItem(taskId, null)
+                .set("mid", AttrType.BIN, MONITOR_ID_QUEUED)
+                .when((expr) -> expr.beginsWith("mid", "$"));
+        } catch ( RollbackException ex ) {
+            return;
+        }
+        // We moved the task out of waiting, so let's execute it:
+        submitRunTask(taskId);
+    }
 
     public void releaseLocksForMonitorId(String monitorId) throws InterruptedException {
         LOG.debug("Releasing locks for monitorId="+monitorId);
@@ -410,6 +431,7 @@ public class TaskManagerImpl implements TaskManager {
             .put("preq", new TypeReference<Set<Long>>(){}, "prerequisiteTaskIds")
             .put("any", Boolean.class, "anyPrerequisiteTaskId")
             .put("mid", String.class, "monitorId")
+            .put("upd", byte[].class, "updateData")
             .put("st8", byte[].class, "checkpointData")
             .put("err", String.class, "errorMessage")
             .put("errT", String.class, "errorMessageStackTrace")
@@ -814,6 +836,10 @@ public class TaskManagerImpl implements TaskManager {
             return _monitorInfo;
         }
         @Override
+        public byte[] getUpdateData() {
+            return (null == _task) ? null : _task.updateData;
+        }
+        @Override
         public void commitCheckpointData(byte[] checkpointData) {
             try {
                 _tasks.updateItem(_task.getTaskId(), null)
@@ -857,18 +883,19 @@ public class TaskManagerImpl implements TaskManager {
                 finalTask.taskState = TaskState.CANCELED;
                 return;
             }
-            if ( null != finalTask.getMillisecondsRemaining() ) {
-                monitorDelayedTask(finalTask);
-                // NOTE: we MUST keep the mid locked in this scenario!
-                finalTask.taskState = TaskState.WAITING_FOR_INTERVAL;
-                return;
-            }
+            if ( null == originalTask.updateData ) {
+                if ( null != finalTask.getMillisecondsRemaining() ) {
+                    monitorDelayedTask(finalTask);
+                    // NOTE: we MUST keep the mid locked in this scenario!
+                    finalTask.taskState = TaskState.WAITING_FOR_INTERVAL;
+                    return;
+                }
 
-            if ( ! checkPrerequisites(finalTask) ) return;
-            if ( ! acquireLocks(finalTask, locksAcquired, monitorInfo.getMonitorId()) ) {
-                return;
+                if ( ! checkPrerequisites(finalTask) ) return;
+                if ( ! acquireLocks(finalTask, locksAcquired, monitorInfo.getMonitorId()) ) {
+                    return;
+                }
             }
-
             TaskFunction taskFunction = _taskFunctions.get(finalTask.getEntityType());
             if ( null == taskFunction ) {
                 LOG.info("Unsupported entityType="+finalTask.getEntityType()+" taskId="+taskId);
@@ -953,7 +980,22 @@ public class TaskManagerImpl implements TaskManager {
                 try {
                     update.when((expr) -> expr.eq("mid", monitorInfo.getMonitorId()));
                 } catch ( RollbackException rollbackEx ) {
-                    throw new LostLockException("taskId="+originalTask.getTaskId());
+                    throw new LostLockException("taskId="+taskId);
+                }
+                if ( null != originalTask.updateData ) {
+                    // Remove the update data, but only if has remained unchanged (which
+                    // is why we have to do a separate update):
+                    try {
+                        UpdateItemBuilder removeUpd = _tasks.updateItem(originalTask.getTaskId(), null)
+                            .remove("upd");
+                        if ( finalTask.getTaskState().isTerminal() ) {
+                            removeUpd.always();
+                        } else {
+                            removeUpd.when((expr) -> expr.eq("upd", originalTask.updateData));
+                        }
+                    } catch ( RollbackException ex ) {
+                        LOG.debug("'upd' of taskId="+taskId+" changed during run, not clearing 'upd'");
+                    }
                 }
 
                 releaseLocks(locksAcquired,

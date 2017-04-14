@@ -14,6 +14,13 @@ public interface TaskContext {
      */
     public MonitorInfo getMonitorInfo();
     /**
+     * NOTE: If this is non-null then the task is being ran regardless
+     * of locks / prerequisites / timeouts.
+     *
+     * @return the update data associated with this task.
+     */
+    public byte[] getUpdateData();
+    /**
      * @param checkpointData which should be saved for this TaskContext.
      *
      * Note that your TaskFunction can also return a new TaskInfo
