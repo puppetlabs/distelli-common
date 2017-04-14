@@ -3,7 +3,7 @@
 
   <groupId>com.distelli.objectStore</groupId>
   <artifactId>object-store-impl</artifactId>
-  <version>9.5.2</version>
+  <version>9.5.3-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <name>object-store-impl</name>
@@ -11,7 +11,7 @@
   <parent>
     <groupId>com.distelli.common</groupId>
     <artifactId>distelli-common-pom</artifactId>
-    <version>9.5.2</version>
+    <version>9.5.3-SNAPSHOT</version>
   </parent>
 
   <build>
@@ -50,13 +50,13 @@
     <dependency>
       <groupId>com.distelli.objectStore</groupId>
       <artifactId>object-store-api</artifactId>
-      <version>9.5.2</version>
+      <version>9.5.3-SNAPSHOT</version>
     </dependency>
 
     <dependency>
       <groupId>com.distelli.utils</groupId>
       <artifactId>Utilities</artifactId>
-      <version>9.5.2</version>
+      <version>9.5.3-SNAPSHOT</version>
     </dependency>
 
     <dependency>
