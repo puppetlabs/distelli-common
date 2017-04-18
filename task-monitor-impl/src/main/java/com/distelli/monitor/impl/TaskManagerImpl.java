@@ -900,6 +900,7 @@ public class TaskManagerImpl implements TaskManager {
             LOG.debug("Something else is running taskId="+taskId);
             return;
         }
+        boolean submitQueuedTask = true;
         boolean interrupted = false;
         Task finalTask = new Task(originalTask);
         finalTask.taskState = TaskState.QUEUED;
@@ -926,8 +927,10 @@ public class TaskManagerImpl implements TaskManager {
             TaskFunction taskFunction = _taskFunctions.get(finalTask.getEntityType());
             if ( null == taskFunction ) {
                 LOG.info("Unsupported entityType="+finalTask.getEntityType()+" taskId="+taskId);
-                // Mark as queued, but let some other monitor obtain the lock:
-                finalTask.taskState = TaskState.QUEUED;
+                // Wait for a time period:
+                finalTask.millisecondsRemaining = 60000L;
+                finalTask.taskState = TaskState.SUCCESS;
+                submitQueuedTask = false;
                 return;
             }
 
@@ -969,7 +972,7 @@ public class TaskManagerImpl implements TaskManager {
                 }
                 try {
                     interrupted |= updateTaskState(
-                        originalTask, finalTask, locksAcquired, monitorInfo);
+                        originalTask, finalTask, locksAcquired, monitorInfo, submitQueuedTask);
                 } catch ( Throwable ex ) {
                     LOG.error("Failing heartbeat "+monitorInfo.getMonitorId()+
                               " in updateTaskState due to taskId="+taskId+": "+
@@ -988,7 +991,7 @@ public class TaskManagerImpl implements TaskManager {
     }
 
     // Returns true if thread was interrupted...
-    private boolean updateTaskState(Task originalTask, Task finalTask, List<String> locksAcquired, MonitorInfo monitorInfo) {
+    private boolean updateTaskState(Task originalTask, Task finalTask, List<String> locksAcquired, MonitorInfo monitorInfo, boolean submitQueuedTask) {
         boolean interrupted = false;
         long taskId = originalTask.getTaskId();
         List<Long> taskIdsToRun = new ArrayList<>();
@@ -1020,7 +1023,7 @@ public class TaskManagerImpl implements TaskManager {
                         if ( null != task && monitorInfo.getMonitorId().equals(task.getMonitorId()) ) {
                             LOG.debug("'agn' of taskId="+taskId+" changed during run, retrying");
                             finalTask.taskState = TaskState.QUEUED;
-                            taskIdsToRun.add(taskId);
+                            if ( submitQueuedTask ) taskIdsToRun.add(taskId);
                             continue;
                         }
                     }
@@ -1055,7 +1058,7 @@ public class TaskManagerImpl implements TaskManager {
                     }
                     taskIdsToRun.clear();
 
-                    if ( TaskState.QUEUED == finalTask.getTaskState() ) {
+                    if ( submitQueuedTask && TaskState.QUEUED == finalTask.getTaskState() ) {
                         submitRunTask(taskId);
                     }
                 }
