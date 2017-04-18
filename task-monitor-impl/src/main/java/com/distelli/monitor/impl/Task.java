@@ -25,6 +25,7 @@ public class Task implements TaskInfo {
     public Long startTime;
     public Long endTime;
     public Long runCount;
+    public Long requeues;
     public Long millisecondsRemaining;
     public String canceledBy;
 

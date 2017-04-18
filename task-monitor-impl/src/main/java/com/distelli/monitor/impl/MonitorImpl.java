@@ -216,7 +216,7 @@ public class MonitorImpl implements Monitor {
                 monitor.dumpThreads();
             LOG.error(msg);
             System.err.println(msg);
-            System.exit(-1);
+            Runtime.getRuntime().halt(-1);
         }
 
         Task task = new Task();

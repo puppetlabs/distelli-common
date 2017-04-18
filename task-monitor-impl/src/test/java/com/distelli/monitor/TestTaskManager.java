@@ -24,6 +24,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.Ignore;
 import static org.junit.Assert.*;
 import com.distelli.utils.Log4JConfigurator;
 import org.slf4j.Logger;
@@ -177,14 +178,50 @@ public class TestTaskManager {
             });
     }
 
+    // This is a manual test that requires substantial time to run:
+    @Test @Ignore
+    public void testSystemOverload() throws Exception {
+        final int taskCount = 50;
+        CountDownLatch latch = new CountDownLatch(taskCount+1);
+        _testTask._latch = latch;
+        _taskManager.monitorTaskQueue();
+        TaskInfo blockingTask = _taskManager.createTask()
+            .entityType(TestTask.ENTITY_TYPE)
+            .entityId("testNoop")
+            .build();
+        List<Long> prereqs = new ArrayList<>();
+        prereqs.add(blockingTask.getTaskId());
+        for ( int i=0; i < 50; i++ ) {
+            TaskInfo waitingTask = _taskManager.createTask()
+                .entityType(TestTask.ENTITY_TYPE)
+                .entityId("testNoop")
+                .prerequisiteTaskIds(prereqs)
+                .build();
+            _taskManager.addTask(waitingTask);
+            prereqs.add(waitingTask.getTaskId());
+        }
+        _taskManager.addTask(blockingTask);
+        latch.await();
+        _taskManager.stopTaskQueueMonitor(false);
+    }
+    // If tasks are already queued that you want to simply run:
+    @Test @Ignore
+    public void waitForCompletion() throws Exception {
+        CountDownLatch latch = new CountDownLatch(47);
+        _testTask._latch = latch;
+        _taskManager.monitorTaskQueue();
+        latch.await();
+        _taskManager.stopTaskQueueMonitor(false);
+    }
+
     @Test
     public void testPrerequisites() throws Exception {
         final int taskCount = 5;
-        _taskManager.monitorTaskQueue();
         TaskInfo lastTask = null;
         CountDownLatch latch = new CountDownLatch(taskCount);
         _testTask._latch = latch;
         _testTask._tasksRan = new ArrayList<>();
+        _taskManager.monitorTaskQueue();
         List<Long> taskIds = new ArrayList<>();
         for ( int i=0; i < taskCount; i++ ) {
             Set<Long> prereqs = ( null == lastTask ) ?
@@ -211,10 +248,10 @@ public class TestTaskManager {
     @Test
     public void testAnyPrerequisite() throws Exception {
         final int foreverTaskCount = 5;
-        _taskManager.monitorTaskQueue();
         CountDownLatch latch = new CountDownLatch(foreverTaskCount + 2);
         _testTask._latch = latch;
         _testTask._tasksRan = new ArrayList<>();
+        _taskManager.monitorTaskQueue();
         List<Long> taskIds = new ArrayList<>();
         try {
             // Start the forever Tasks:
@@ -271,10 +308,11 @@ public class TestTaskManager {
     @Test
     public void testDelayed() throws Exception {
         final int delayCount = 5;
-        _taskManager.monitorTaskQueue();
 
         CountDownLatch latch = new CountDownLatch(delayCount);
         _testTask._latch = latch;
+
+        _taskManager.monitorTaskQueue();
 
         TaskInfo task = _taskManager.createTask()
             .entityType(TestTask.ENTITY_TYPE)
@@ -316,11 +354,11 @@ public class TestTaskManager {
 
     @Test
     public void testFailedMonitor() throws Exception {
-        _taskManager.monitorTaskQueue();
-
         CountDownLatch latch = new CountDownLatch(1);
         _testTask._latch = latch;
         _testTask._failMonitor = true;
+
+        _taskManager.monitorTaskQueue();
 
         TaskInfo task = _taskManager.createTask()
             .entityType(TestTask.ENTITY_TYPE)

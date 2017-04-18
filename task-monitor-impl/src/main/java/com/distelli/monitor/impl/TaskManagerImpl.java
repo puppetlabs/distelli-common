@@ -12,6 +12,7 @@ import com.distelli.monitor.TaskManager;
 import com.distelli.monitor.TaskState;
 import com.distelli.persistence.AttrType;
 import com.distelli.persistence.Index;
+import com.distelli.persistence.FilterCondExpr;
 import com.distelli.persistence.PageIterator;
 import com.distelli.persistence.TableDescription;
 import com.distelli.persistence.UpdateItemBuilder;
@@ -26,11 +27,14 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
@@ -58,7 +62,7 @@ import static com.distelli.utils.LongSortKey.*;
 @Singleton
 public class TaskManagerImpl implements TaskManager {
     private static final int POLL_INTERVAL_MS = 10000;
-    private static final int MAX_TASKS_IN_INTERVAL = 100;
+    private static final int MAX_TASKS_IN_INTERVAL = 50;
     private static final String TASK_ID_NONE = "#";
     private static final String MONITOR_ID_QUEUED = "#";
     private static final String MONITOR_ID_WAITING = "$";
@@ -84,8 +88,11 @@ public class TaskManagerImpl implements TaskManager {
     private final Map<Long, DelayedTask> _delayedTasks =
         new ConcurrentHashMap<>();
 
-    private AtomicInteger _spawnedCount = new AtomicInteger(0);
+    private Semaphore _capacity;
+    private int _maxCapacity;
 
+    // synchronized(_queuedTasks):
+    private Set<Long> _taskQueue = new LinkedHashSet<>();
     // synchronized(this):
     private ScheduledFuture<?> _monitorTasks;
     // synchronized(this):
@@ -279,6 +286,7 @@ public class TaskManagerImpl implements TaskManager {
     @Override
     public synchronized void monitorTaskQueue() {
         if ( null != _monitorTasks ) return;
+        if ( null == _executor ) return;
         _monitorTasks = _executor.scheduleAtFixedRate(
             this::startRunnableTasks,
             ThreadLocalRandom.current().nextLong(POLL_INTERVAL_MS),
@@ -302,13 +310,12 @@ public class TaskManagerImpl implements TaskManager {
                 future.cancel(mayInterruptIfRunning);
             }
             _spawnedFutures.clear();
-            while ( null == _monitorTasks && _spawnedCount.get() > 0 ) {
-                try {
-                    wait();
-                } catch ( InterruptedException ex ) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
+            try {
+                _capacity.acquire(_maxCapacity);
+                _capacity.release(_maxCapacity);
+            } catch ( InterruptedException ex ) {
+                Thread.currentThread().interrupt();
+                return;
             }
         }
     }
@@ -377,10 +384,24 @@ public class TaskManagerImpl implements TaskManager {
     }
 
     @Inject
-    protected TaskManagerImpl(Index.Factory indexFactory) {
+    protected TaskManagerImpl() {}
+
+    @Inject
+    protected void init(Index.Factory indexFactory, ScheduledExecutorService executorService) {
+        // TODO: Make this tunable with a guice configuration:
+        _maxCapacity = 5;
+        if ( executorService instanceof ScheduledThreadPoolExecutor ) {
+            _maxCapacity = ((ScheduledThreadPoolExecutor)executorService).getCorePoolSize() - 1;
+            if ( _maxCapacity <= 0 ) {
+                _maxCapacity = 1;
+                LOG.error("Detected ScheduledThreadPoolExecutor with corePoolSize <=1, thread starvation is likely.");
+            } else if ( _maxCapacity > 10 ) _maxCapacity--;
+        }
+        _capacity = new Semaphore(_maxCapacity);
+
         _om.registerModule(createTransforms(new TransformModule()));
 
-        String[] noEncrypt = new String[]{"cnt", "tic"};
+        String[] noEncrypt = new String[]{"cnt", "agn", "tic"};
         _tasks = indexFactory.create(Task.class)
             .withTableDescription(TasksTable.getTableDescription())
             .withConvertValue(_om::convertValue)
@@ -439,6 +460,7 @@ public class TaskManagerImpl implements TaskManager {
             .put("ts", Long.class, "startTime")
             .put("tf", Long.class, "endTime")
             .put("cnt", Long.class, "runCount")
+            .put("agn", Long.class, "requeues")
             .put("tic", Long.class, "millisecondsRemaining")
             .put("cancel", String.class, "canceledBy");
         module.createTransform(Lock.class)
@@ -532,83 +554,85 @@ public class TaskManagerImpl implements TaskManager {
         return TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
     }
 
-    private synchronized void submitRunTask(long taskId) {
+    private void runNextTask() {
+        // We are at capacity, don't actually run a task:
+        if ( ! _capacity.tryAcquire(1) ) {
+            LOG.warn("Insufficient capacity to run the next task, try increasing thread pool size");
+            return;
+        }
+        Long taskId = null;
+        try {
+            synchronized ( _taskQueue ) {
+                if ( _taskQueue.isEmpty() ) return;
+                taskId = _taskQueue.iterator().next();
+                _taskQueue.remove(taskId);
+            }
+            runTask(taskId);
+        } catch ( Throwable ex ) {
+            LOG.error("runTask("+taskId+"): "+ex.getMessage(), ex);
+        } finally {
+            _capacity.release();
+
+            synchronized ( _taskQueue ) {
+                if ( _taskQueue.isEmpty() ) return;
+            }
+
+            // It doesn't hurt to run this to much, but it does hurt to not
+            // run it enough. Be sure to throttle:
+            schedule(this::runNextTask, POLL_INTERVAL_MS/MAX_TASKS_IN_INTERVAL);
+        }
+    }
+
+    private synchronized void submit(Runnable run) {
         if ( null == _monitorTasks ) return;
+        if ( null == _executor ) return;
         AtomicReference<Future<?>> futureRef = new AtomicReference<>();
-        futureRef.set(
-            _executor.submit(
-                () -> {
+        futureRef.set(_executor.submit(() -> {
                     try {
-                        try {
-                            _spawnedCount.incrementAndGet();
-                            runTask(taskId);
-                        } finally {
-                            synchronized ( this ) {
-                                _spawnedFutures.remove(futureRef.get());
-                                if ( _spawnedCount.decrementAndGet() <= 0 ) {
-                                    notifyAll();
-                                }
-                            }
-                        }
+                        run.run();
                     } catch ( Throwable ex ) {
-                        LOG.error("runTask("+taskId+"): "+ex.getMessage(), ex);
+                        LOG.error(ex.getMessage(), ex);
+                    } finally {
+                        synchronized ( this ) {
+                            _spawnedFutures.remove(futureRef.get());
+                        }
                     }
                 }));
         _spawnedFutures.add(futureRef.get());
     }
 
-    private synchronized void scheduleRunTask(long taskId, long interval) {
+    private synchronized void schedule(Runnable run, long intervalMS) {
         if ( null == _monitorTasks ) return;
+        if ( null == _executor ) return;
         AtomicReference<Future<?>> futureRef = new AtomicReference<>();
-        futureRef.set(
-            _executor.schedule(
-                () -> {
+        futureRef.set(_executor.schedule(() -> {
                     try {
-                        try {
-                            _spawnedCount.incrementAndGet();
-                            runTask(taskId);
-                        } finally {
-                            synchronized ( this ) {
-                                _spawnedFutures.remove(futureRef.get());
-                                if ( _spawnedCount.decrementAndGet() <= 0 ) {
-                                    notifyAll();
-                                }
-                            }
-                        }
+                        run.run();
                     } catch ( Throwable ex ) {
-                        LOG.error("runTask("+taskId+"): "+ex.getMessage(), ex);
+                        LOG.error(ex.getMessage(), ex);
+                    } finally {
+                        synchronized ( this ) {
+                            _spawnedFutures.remove(futureRef.get());
+                        }
                     }
-                },
-                interval,
-                TimeUnit.MILLISECONDS));
+                }, intervalMS, TimeUnit.MILLISECONDS));
         _spawnedFutures.add(futureRef.get());
     }
 
-    private synchronized void scheduleDelayedTask(long taskId, long interval) {
-        if ( null == _monitorTasks ) return;
-        AtomicReference<Future<?>> futureRef = new AtomicReference<>();
-        futureRef.set(
-            _executor.schedule(
-                () -> {
-                    try {
-                        try {
-                            _spawnedCount.incrementAndGet();
-                            _monitor.monitor((monitorInfo) -> updateDelayedTask(taskId, monitorInfo));
-                        } finally {
-                            synchronized ( this ) {
-                                _spawnedFutures.remove(futureRef.get());
-                                if ( _spawnedCount.decrementAndGet() <= 0 ) {
-                                    notifyAll();
-                                }
-                            }
-                        }
-                    } catch ( Throwable ex ) {
-                        LOG.error("updateDelayedTask("+taskId+"): "+ex.getMessage(), ex);
-                    }
-                },
-                interval,
-                TimeUnit.MILLISECONDS));
-        _spawnedFutures.add(futureRef.get());
+    private void insertTaskQueue(long taskId) {
+        synchronized ( _taskQueue ) {
+            _taskQueue.add(taskId);
+        }
+    }
+
+    private void submitRunTask(long taskId) {
+        insertTaskQueue(taskId);
+    }
+
+    private synchronized void scheduleDelayedTask(long taskId, long intervalMS) {
+        schedule(() ->
+                 _monitor.monitor((mon) -> updateDelayedTask(taskId, mon)),
+                 intervalMS);
     }
 
     private void monitorDelayedTask(Task task) {
@@ -628,14 +652,12 @@ public class TaskManagerImpl implements TaskManager {
 
     private void startRunnableTasks() {
         try {
-            List<Task> tasks = _tasksForMonitor
-                .queryItems(MONITOR_ID_QUEUED, new PageIterator().pageSize(MAX_TASKS_IN_INTERVAL))
-                .list(Arrays.asList("id"));
-            // Randomly distribute queued tasks:
-            for ( Task task : tasks ) {
-                long interval = ThreadLocalRandom.current().nextLong(POLL_INTERVAL_MS);
-                scheduleRunTask(task.getTaskId(), interval);
+            for ( PageIterator iter : new PageIterator().pageSize(100) ) {
+                for ( Task task : _tasksForMonitor.queryItems(MONITOR_ID_QUEUED, iter).list(Arrays.asList("id")) ) {
+                    insertTaskQueue(task.getTaskId());
+                }
             }
+            submit(this::runNextTask);
             // TODO: Occassionally find all MONITOR_ID_WAITING tasks to check if
             // cleanup needs to happen?
 
@@ -682,6 +704,11 @@ public class TaskManagerImpl implements TaskManager {
     private void runTask(long taskId) {
         try {
             _monitor.monitor((monitorInfo) -> lockAndRunTask(taskId, monitorInfo));
+        } catch ( ShuttingDownException ex ) {
+            synchronized ( this ) {
+                _executor = null;
+                LOG.error(ex.getMessage(), ex);
+            }
         } catch ( Throwable ex ) {
             LOG.error("runTask("+taskId+") FAILED: "+ex.getMessage(), ex);
         }
@@ -977,9 +1004,26 @@ public class TaskManagerImpl implements TaskManager {
                 // to find the task still is not in a terminal state and
                 // therefore the code will assume the enqueue of the prereq was
                 // successful.
+
+                boolean checkForRequeue = MONITOR_ID_WAITING.equals(finalTask.monitorId);
                 try {
-                    update.when((expr) -> expr.eq("mid", monitorInfo.getMonitorId()));
+                    update.when((expr) -> {
+                            FilterCondExpr result = expr.eq("mid", monitorInfo.getMonitorId());
+                            if ( checkForRequeue ) {
+                                result = expr.and(result, expr.eq("agn", originalTask.requeues));
+                            }
+                            return result;
+                        });
                 } catch ( RollbackException rollbackEx ) {
+                    if ( checkForRequeue ) {
+                        Task task = _tasks.getItem(taskId);
+                        if ( null != task && monitorInfo.getMonitorId().equals(task.getMonitorId()) ) {
+                            LOG.debug("'agn' of taskId="+taskId+" changed during run, retrying");
+                            finalTask.taskState = TaskState.QUEUED;
+                            taskIdsToRun.add(taskId);
+                            continue;
+                        }
+                    }
                     throw new LostLockException("taskId="+taskId);
                 }
                 if ( null != originalTask.updateData ) {
@@ -1161,23 +1205,35 @@ public class TaskManagerImpl implements TaskManager {
             if ( retry > 0 ) Thread.sleep(ThreadLocalRandom.current().nextLong(500));
             Long tasksQueued = null;
             for ( PageIterator iter : new PageIterator().pageSize(processPrereqs ? 100 : 2) ) {
+              NEXT_LOCK:
                 for ( Lock lock : _locks.queryItems(lockId, iter).list() ) {
                     if ( TASK_ID_NONE.equals(lock.taskId) ) {
                         tasksQueued = lock.tasksQueued;
                         continue;
                     }
                     Long taskId = sortKeyToLong(lock.taskId);
-                    try {
-                        _tasks.updateItem(taskId, null)
-                            .set("mid", AttrType.STR, MONITOR_ID_QUEUED)
-                            .set("stat", AttrType.STR, toString(TaskState.QUEUED))
-                            .when((expr) -> expr.eq("mid", MONITOR_ID_WAITING));
-                        LOG.debug("unblocked taskId="+taskId+" that was waiting for "+lockId);
-                    } catch ( RollbackException ex ) {
-                        LOG.debug("taskId="+taskId+" was not in a waiting state");
-                        continue;
+                    boolean first = true;
+                    while ( true ) {
+                        try {
+                            _tasks.updateItem(taskId, null)
+                                .set("mid", AttrType.STR, MONITOR_ID_QUEUED)
+                                .set("stat", AttrType.STR, toString(TaskState.QUEUED))
+                                .when((expr) -> expr.eq("mid", MONITOR_ID_WAITING));
+                            LOG.debug("unblocked taskId="+taskId+" that was waiting for "+lockId);
+                            break;
+                        } catch ( RollbackException ex ) {
+                            if ( first ) {
+                                first = false;
+                                LOG.debug("taskId="+taskId+" was not in a waiting state, incrementing 'agn'");
+                                _tasks.updateItem(taskId, null)
+                                    .increment("agn", 1)
+                                    .always();
+                            } else {
+                                LOG.debug("taskId="+taskId+" was not in a waiting state");
+                                continue NEXT_LOCK;
+                            }
+                        }
                     }
-                    taskIdsToRun.add(taskId);
                     // Just unblocking a single task
                     if ( ! processPrereqs ) break;
                 }
