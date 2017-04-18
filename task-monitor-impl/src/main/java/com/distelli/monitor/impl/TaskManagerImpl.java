@@ -333,7 +333,7 @@ public class TaskManagerImpl implements TaskManager {
         }
         try {
             _tasks.updateItem(taskId, null)
-                .set("mid", AttrType.BIN, MONITOR_ID_QUEUED)
+                .set("mid", AttrType.STR, MONITOR_ID_QUEUED)
                 .when((expr) -> expr.beginsWith("mid", "$"));
         } catch ( RollbackException ex ) {
             return;
