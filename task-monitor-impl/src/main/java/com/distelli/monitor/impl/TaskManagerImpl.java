@@ -62,7 +62,7 @@ import static com.distelli.utils.LongSortKey.*;
 @Singleton
 public class TaskManagerImpl implements TaskManager {
     private static final int POLL_INTERVAL_MS = 10000;
-    private static final int MAX_TASKS_IN_INTERVAL = 50;
+    private static final int MAX_TASKS_IN_INTERVAL = 10;
     private static final String TASK_ID_NONE = "#";
     private static final String MONITOR_ID_QUEUED = "#";
     private static final String MONITOR_ID_WAITING = "$";
@@ -78,6 +78,7 @@ public class TaskManagerImpl implements TaskManager {
     @Inject
     private Sequence _sequence;
 
+    // constants (no locking needed):
     private Index<Lock> _locks;
     private Index<Lock> _locksForMonitor;
     private Index<Task> _tasks;
@@ -87,7 +88,6 @@ public class TaskManagerImpl implements TaskManager {
     private final ObjectMapper _om = new ObjectMapper();
     private final Map<Long, DelayedTask> _delayedTasks =
         new ConcurrentHashMap<>();
-
     private Semaphore _capacity;
     private int _maxCapacity;
 
@@ -97,6 +97,10 @@ public class TaskManagerImpl implements TaskManager {
     private ScheduledFuture<?> _monitorTasks;
     // synchronized(this):
     private Set<Future<?>> _spawnedFutures = new HashSet<>();
+    // synchronized(this):
+    private long _lastRunTask = 0;
+    // synchronized(this):
+    private Future<?> _runNextTaskFuture = null;
 
     private static class DelayedTask {
         private DelayedTask(long millisRemaining) {
@@ -241,6 +245,7 @@ public class TaskManagerImpl implements TaskManager {
         _tasks.putItemOrThrow(task);
         // Dispatch:
         submitRunTask(task.getTaskId());
+        submit(this::runNextTask);
     }
 
     @Override
@@ -275,12 +280,14 @@ public class TaskManagerImpl implements TaskManager {
         try {
             _tasks.updateItem(taskId, null)
                 .set("mid", AttrType.STR, MONITOR_ID_QUEUED)
+                .set("stat", AttrType.STR, toString(TaskState.QUEUED))
                 .when((expr) -> expr.beginsWith("mid", "$"));
         } catch ( RollbackException ex ) {
             return;
         }
         // We moved the task out of waiting, so let's execute it:
         submitRunTask(taskId);
+        submit(this::runNextTask);
     }
 
     @Override
@@ -310,13 +317,13 @@ public class TaskManagerImpl implements TaskManager {
                 future.cancel(mayInterruptIfRunning);
             }
             _spawnedFutures.clear();
-            try {
-                _capacity.acquire(_maxCapacity);
-                _capacity.release(_maxCapacity);
-            } catch ( InterruptedException ex ) {
-                Thread.currentThread().interrupt();
-                return;
-            }
+        }
+        try {
+            _capacity.acquire(_maxCapacity);
+            _capacity.release(_maxCapacity);
+        } catch ( InterruptedException ex ) {
+            Thread.currentThread().interrupt();
+            return;
         }
     }
 
@@ -334,12 +341,14 @@ public class TaskManagerImpl implements TaskManager {
         try {
             _tasks.updateItem(taskId, null)
                 .set("mid", AttrType.STR, MONITOR_ID_QUEUED)
+                .set("stat", AttrType.STR, toString(TaskState.QUEUED))
                 .when((expr) -> expr.beginsWith("mid", "$"));
         } catch ( RollbackException ex ) {
             return;
         }
         // We moved the task out of waiting, so let's execute it:
         submitRunTask(taskId);
+        submit(this::runNextTask);
     }
 
     public void releaseLocksForMonitorId(String monitorId) throws InterruptedException {
@@ -355,7 +364,7 @@ public class TaskManagerImpl implements TaskManager {
                     _locks.deleteItem(lock.lockId, TASK_ID_NONE,
                                       (expr) -> expr.eq("mid", monitorId));
                 } catch ( RollbackException ex ) {
-                    LOG.debug("LostLockException: releaseLocksForMonitorId="+monitorId+" taskId="+
+                    LOG.debug("LostLockException: releaseLock="+lock.lockId+" for monitorId="+monitorId+" taskId="+
                               lock.runningTaskId);
                 }
                 // Do not immediately dispatch these blocked tasks, so the next code can
@@ -367,11 +376,13 @@ public class TaskManagerImpl implements TaskManager {
             }
         }
         // Put the tasks back into a runnable state:
+        boolean taskSubmitted = false;
         for ( PageIterator iter : new PageIterator() ) {
             for ( Task task : _tasksForMonitor.queryItems(monitorId, iter).list() ) {
                 try {
                     _tasks.updateItem(task.getTaskId(), null)
                         .set("mid", AttrType.STR, MONITOR_ID_QUEUED)
+                        .set("stat", AttrType.STR, toString(TaskState.QUEUED))
                         .when((expr) -> expr.eq("mid", monitorId));
                 } catch ( RollbackException ex ) {
                     LOG.debug("LostLockException: releaseLocksForMonitorId="+monitorId+" taskId="+
@@ -379,7 +390,11 @@ public class TaskManagerImpl implements TaskManager {
                     continue;
                 }
                 submitRunTask(task.getTaskId());
+                taskSubmitted = true;
             }
+        }
+        if ( taskSubmitted ) {
+            submit(this::runNextTask);
         }
     }
 
@@ -557,16 +572,44 @@ public class TaskManagerImpl implements TaskManager {
     private void runNextTask() {
         // We are at capacity, don't actually run a task:
         if ( ! _capacity.tryAcquire(1) ) {
-            LOG.warn("Insufficient capacity to run the next task, try increasing thread pool size");
+            // This is pretty common place, so do not log it:
+            //LOG.warn("Insufficient capacity to run the next task, try increasing thread pool size");
             return;
         }
         Long taskId = null;
         try {
-            synchronized ( _taskQueue ) {
-                if ( _taskQueue.isEmpty() ) return;
-                taskId = _taskQueue.iterator().next();
-                _taskQueue.remove(taskId);
+            // Spread-out running tasks to avoid slamming the DB with writes:
+            synchronized ( this ) {
+                long now = milliTime();
+                long remaining = _lastRunTask + POLL_INTERVAL_MS/MAX_TASKS_IN_INTERVAL - now;
+                if ( remaining > 0 ) {
+                    // Delay the next task run:
+                    if ( null == _runNextTaskFuture ) {
+                        _runNextTaskFuture = schedule(this::runNextTask, remaining);
+                    }
+                    return;
+                } else {
+                    _runNextTaskFuture = null;
+                    _lastRunTask = now;
+                }
             }
+
+            // Read tasks from the queue until we find one that is in a queued state and
+            // therefore is likely to acquire the lock:
+            while ( true ) {
+                synchronized ( _taskQueue ) {
+                    if ( _taskQueue.isEmpty() ) return;
+                    taskId = _taskQueue.iterator().next();
+                    _taskQueue.remove(taskId);
+                }
+
+                Task task = _tasks.getItem(taskId);
+                if ( null != task && MONITOR_ID_QUEUED.equals(task.getMonitorId()) ) {
+                    break;
+                }
+            }
+            LOG.debug("runTask("+taskId+")");
+
             runTask(taskId);
         } catch ( Throwable ex ) {
             LOG.error("runTask("+taskId+"): "+ex.getMessage(), ex);
@@ -578,8 +621,8 @@ public class TaskManagerImpl implements TaskManager {
             }
 
             // It doesn't hurt to run this to much, but it does hurt to not
-            // run it enough. Be sure to throttle:
-            schedule(this::runNextTask, POLL_INTERVAL_MS/MAX_TASKS_IN_INTERVAL);
+            // run it enough:
+            submit(this::runNextTask);
         }
     }
 
@@ -601,9 +644,9 @@ public class TaskManagerImpl implements TaskManager {
         _spawnedFutures.add(futureRef.get());
     }
 
-    private synchronized void schedule(Runnable run, long intervalMS) {
-        if ( null == _monitorTasks ) return;
-        if ( null == _executor ) return;
+    private synchronized Future<?> schedule(Runnable run, long intervalMS) {
+        if ( null == _monitorTasks ) return null;
+        if ( null == _executor ) return null;
         AtomicReference<Future<?>> futureRef = new AtomicReference<>();
         futureRef.set(_executor.schedule(() -> {
                     try {
@@ -617,16 +660,13 @@ public class TaskManagerImpl implements TaskManager {
                     }
                 }, intervalMS, TimeUnit.MILLISECONDS));
         _spawnedFutures.add(futureRef.get());
-    }
-
-    private void insertTaskQueue(long taskId) {
-        synchronized ( _taskQueue ) {
-            _taskQueue.add(taskId);
-        }
+        return futureRef.get();
     }
 
     private void submitRunTask(long taskId) {
-        insertTaskQueue(taskId);
+        synchronized ( _taskQueue ) {
+            _taskQueue.add(taskId);
+        }
     }
 
     private synchronized void scheduleDelayedTask(long taskId, long intervalMS) {
@@ -652,12 +692,16 @@ public class TaskManagerImpl implements TaskManager {
 
     private void startRunnableTasks() {
         try {
+            boolean taskSubmitted = false;
             for ( PageIterator iter : new PageIterator().pageSize(100) ) {
                 for ( Task task : _tasksForMonitor.queryItems(MONITOR_ID_QUEUED, iter).list(Arrays.asList("id")) ) {
-                    insertTaskQueue(task.getTaskId());
+                    submitRunTask(task.getTaskId());
+                    taskSubmitted = true;
                 }
             }
-            submit(this::runNextTask);
+            if ( taskSubmitted ) {
+                submit(this::runNextTask);
+            }
             // TODO: Occassionally find all MONITOR_ID_WAITING tasks to check if
             // cleanup needs to happen?
 
@@ -691,6 +735,7 @@ public class TaskManagerImpl implements TaskManager {
             if ( newRemaining <= 0 || null == monitorInfo ) { // stop monitoring:
                 _delayedTasks.remove(taskId, delayedTask);
                 submitRunTask(taskId);
+                submit(this::runNextTask);
                 return;
             }
             delayedTask.millisRemaining = newRemaining;
@@ -1053,13 +1098,19 @@ public class TaskManagerImpl implements TaskManager {
 
                 // Get the tasks to run immediately:
                 if ( _monitor.isActiveMonitor(monitorInfo) ) {
+                    boolean taskSubmitted = false;
                     for ( Long taskIdToRun : taskIdsToRun ) {
                         submitRunTask(taskIdToRun);
+                        taskSubmitted = true;
                     }
                     taskIdsToRun.clear();
 
                     if ( submitQueuedTask && TaskState.QUEUED == finalTask.getTaskState() ) {
                         submitRunTask(taskId);
+                        taskSubmitted = true;
+                    }
+                    if ( taskSubmitted ) {
+                        submit(this::runNextTask);
                     }
                 }
                 return interrupted;
@@ -1223,6 +1274,7 @@ public class TaskManagerImpl implements TaskManager {
                                 .set("stat", AttrType.STR, toString(TaskState.QUEUED))
                                 .when((expr) -> expr.eq("mid", MONITOR_ID_WAITING));
                             LOG.debug("unblocked taskId="+taskId+" that was waiting for "+lockId);
+                            taskIdsToRun.add(taskId);
                             break;
                         } catch ( RollbackException ex ) {
                             if ( first ) {

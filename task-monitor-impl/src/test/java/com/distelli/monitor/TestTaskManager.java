@@ -370,11 +370,14 @@ public class TestTaskManager {
         latch.await();
         _taskManager.stopTaskQueueMonitor(false);
 
-        // Aborted, so from the outside it appears to be running:
-        assertEquals(TaskState.RUNNING, _taskManager.getTask(task.getTaskId()).getTaskState());
+        assertEquals(TaskState.QUEUED, _taskManager.getTask(task.getTaskId()).getTaskState());
 
-        // but the "_BROKE" lock should still be around, preventing other tasks from running
-        // until it is cleaned-up. Task that failed the monitor should be ran again.
+        String monitorId = _testTask._monitorIdFailed;
+        _testTask._monitorIdFailed = null;
+        assertNotNull(monitorId);
+
+        // The _BROKE monitor should have also been cleaned up. We should see the testFailedMonitor
+        // task and the testNoop task added below run again:
         latch = new CountDownLatch(2);
         _testTask._latch = latch;
         _testTask._failMonitor = false;
@@ -383,6 +386,7 @@ public class TestTaskManager {
             .entityType(TestTask.ENTITY_TYPE)
             .entityId("testNoop")
             .lockIds("_BROKE")
+            .prerequisiteTaskIds(task.getTaskId())
             .build();
 
         _taskManager.monitorTaskQueue();
@@ -398,17 +402,15 @@ public class TestTaskManager {
             case RUNNING: // in this state when scanning for locks.
                 Thread.sleep(100);
                 continue;
-            case SUCCESS: // monitor may have already been cleaned-up:
-            case WAITING_FOR_LOCK:
+            case SUCCESS:
+            case WAITING_FOR_LOCK: 
+            case WAITING_FOR_PREREQUISITE:
                 break POLL;
             default:
                 fail("Unexpected taskState="+state+" for taskId="+task.getTaskId());
             }
         }
 
-        String monitorId = _testTask._monitorIdFailed;
-        _testTask._monitorIdFailed = null;
-        assertNotNull(monitorId);
 
         // Cleanup:
         _monitor.reapMonitorId(monitorId);
