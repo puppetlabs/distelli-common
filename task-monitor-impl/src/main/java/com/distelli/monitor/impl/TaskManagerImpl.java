@@ -1058,7 +1058,10 @@ public class TaskManagerImpl implements TaskManager {
                     update.when((expr) -> {
                             FilterCondExpr result = expr.eq("mid", monitorInfo.getMonitorId());
                             if ( checkForRequeue ) {
-                                result = expr.and(result, expr.eq("agn", originalTask.requeues));
+                                result = expr.and(result,
+                                                  ( null == originalTask.requeues ) ?
+                                                  expr.not(expr.exists("agn")) :
+                                                  expr.eq("agn", originalTask.requeues));
                             }
                             return result;
                         });
@@ -1066,7 +1069,8 @@ public class TaskManagerImpl implements TaskManager {
                     if ( checkForRequeue ) {
                         Task task = _tasks.getItem(taskId);
                         if ( null != task && monitorInfo.getMonitorId().equals(task.getMonitorId()) ) {
-                            LOG.debug("'agn' of taskId="+taskId+" changed during run, retrying");
+                            LOG.debug("'agn'="+originalTask.requeues+" of taskId="+taskId+
+                                      " changed to="+task.requeues+" during run, retrying");
                             finalTask.taskState = TaskState.QUEUED;
                             if ( submitQueuedTask ) taskIdsToRun.add(taskId);
                             continue;
