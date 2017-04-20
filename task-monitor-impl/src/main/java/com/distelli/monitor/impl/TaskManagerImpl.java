@@ -122,8 +122,9 @@ public class TaskManagerImpl implements TaskManager {
                 //    '#' - Runnable
                 //    '$' - Waiting on lock/prequisite
                 .index((idx) -> idx
-                       .indexName("mid-index")
-                       .hashKey("mid", AttrType.STR))
+                       .indexName("mid-id-index")
+                       .hashKey("mid", AttrType.STR)
+                       .rangeKey("id", AttrType.NUM))
                 // Query on entities:
                 .index((idx) -> idx
                        .indexName("ety-eid-index")
@@ -424,7 +425,7 @@ public class TaskManagerImpl implements TaskManager {
             .build();
 
         _tasksForMonitor = indexFactory.create(Task.class)
-            .withTableDescription(TasksTable.getTableDescription(), "mid-index")
+            .withTableDescription(TasksTable.getTableDescription(), "mid-id-index")
             .withConvertValue(_om::convertValue)
             .withNoEncrypt(noEncrypt)
             .build();
