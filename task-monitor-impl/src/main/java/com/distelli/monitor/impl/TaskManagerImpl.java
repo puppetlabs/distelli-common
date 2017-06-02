@@ -417,7 +417,7 @@ public class TaskManagerImpl implements TaskManager {
 
         _om.registerModule(createTransforms(new TransformModule()));
 
-        String[] noEncrypt = new String[]{"cnt", "agn", "tic"};
+        String[] noEncrypt = new String[]{"cnt", "agn", "tic", "upd"};
         _tasks = indexFactory.create(Task.class)
             .withTableDescription(TasksTable.getTableDescription())
             .withConvertValue(_om::convertValue)
