@@ -8,6 +8,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 
 public class ResettableInputStream extends InputStream {
+    private static final int BUFFER_SIZE = 1024*1024;
     private InputStream _inputStream;
     private FileChannel _fileChannel;
     private long _mark;
@@ -23,6 +24,12 @@ public class ResettableInputStream extends InputStream {
             StandardOpenOption.DELETE_ON_CLOSE);
         _mark = _fileChannel.position();
         _hwm = _mark;
+    }
+
+    //////////////////////////////////////////////////////////////////////
+    // Obtain the underlying file channel size:
+    public long size() throws IOException {
+        return _fileChannel.size();
     }
 
     @Override
@@ -79,12 +86,9 @@ public class ResettableInputStream extends InputStream {
 
     @Override
     public synchronized int available() throws IOException {
-        if ( _fileChannel.position() >= _hwm ) {
-            return _inputStream.available();
-        } else {
-            // TODO: How do I determine this with a FileChannel?
-            return 0;
-        }
+        long pos = _fileChannel.position();
+        return _inputStream.available() +
+            ( _hwm > pos ? Math.toIntExact(_hwm - pos) : 0 );
     }
 
     @Override
@@ -114,5 +118,27 @@ public class ResettableInputStream extends InputStream {
     @Override
     public boolean markSupported() {
         return true;
+    }
+
+    @Override
+    public synchronized long skip(long cnt) throws IOException {
+        long fcSize = Math.min(_hwm - _fileChannel.position(), cnt);
+        long skipped = 0;
+        if ( fcSize > 0 ) {
+            _fileChannel.position(_fileChannel.position() + fcSize);
+            if ( cnt == fcSize ) return cnt;
+            skipped += fcSize;
+            cnt -= fcSize;
+        }
+
+        // Read so we save it to the file channel:
+        byte[] buff = new byte[cnt < BUFFER_SIZE ? Math.toIntExact(cnt) : BUFFER_SIZE];
+        while ( cnt > 0 ) {
+            int size = read(buff);
+            if ( size < 0 ) return skipped;
+            skipped += size;
+            cnt -= size;
+        }
+        return skipped;
     }
 }
