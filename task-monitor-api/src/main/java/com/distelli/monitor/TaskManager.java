@@ -44,6 +44,28 @@ public interface TaskManager {
         String entityType, String taskIdBeginsWith, PageIterator iter);
 
     /**
+     * Get all tasks that are in a non-terminal state sorted based on
+     * the "monitor id" followed by id. Note that this is a SCAN and
+     * therefore the PageIterator will not work when going backward.
+     *
+     * @param iter used for iterating over all tasks.
+     *
+     * @return the list of tasks.
+     */
+    public List<? extends TaskInfo> getNonTerminalTasks(PageIterator iter);
+
+    /**
+     * Get ALL tasks in no particular order (might be sorted on id if
+     * using mysql for example). Note that this is a SCAN and
+     * therefore the PageIterator will not work when going backward.
+     *
+     * @param iter used for iterating over all tasks.
+     *
+     * @return the list of tasks.
+     */
+    public List<? extends TaskInfo> getAllTasks(PageIterator iter);
+
+    /**
      * @param taskId of the task to obtain.
      *
      * @return the cooresponding task or null if the task was not found.

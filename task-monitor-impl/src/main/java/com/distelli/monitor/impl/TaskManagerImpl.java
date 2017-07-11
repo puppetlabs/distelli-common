@@ -191,6 +191,16 @@ public class TaskManagerImpl implements TaskManager {
     }
 
     @Override
+    public List<? extends TaskInfo> getNonTerminalTasks(PageIterator iter) {
+        return _tasksForMonitor.scanItems(iter);
+    }
+
+    @Override
+    public List<? extends TaskInfo> getAllTasks(PageIterator iter) {
+        return _tasks.scanItems(iter);
+    }
+
+    @Override
     public TaskInfo getTask(Long taskId) {
         return _tasks.getItem(taskId, null);
     }
