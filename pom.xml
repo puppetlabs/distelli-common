@@ -35,7 +35,7 @@
   <properties>
     <aws-java-sdk.version>1.11.125</aws-java-sdk.version>
     <guice.version>4.1.0</guice.version>
-    <persistence.version>3.3.0</persistence.version>
+    <persistence.version>3.5.1</persistence.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
   <distributionManagement>
