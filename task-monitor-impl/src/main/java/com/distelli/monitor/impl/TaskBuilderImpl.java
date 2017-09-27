@@ -74,6 +74,11 @@ public class TaskBuilderImpl implements TaskBuilder {
 
     @Override
     public TaskBuilder millisecondsRemaining(long millisecondsRemaining) {
+        return millisecondsRemaining(Long.valueOf(millisecondsRemaining));
+    }
+
+    @Override
+    public TaskBuilder millisecondsRemaining(Long millisecondsRemaining) {
         proto.millisecondsRemaining = millisecondsRemaining;
         return this;
     }

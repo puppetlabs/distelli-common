@@ -27,7 +27,7 @@ public class ReapMonitorTask implements TaskFunction {
             LOG.error("ReapMonitorTaskFailed: "+ex.getCause(), ex);
             // Be sure to retry this in another minute:
             return ctx.getTaskInfo().toBuilder()
-                .millisecondsRemaining(60000)
+                .millisecondsRemaining(60000L)
                 .build();
         }
         return null;

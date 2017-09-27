@@ -71,6 +71,7 @@ public interface TaskBuilder {
      *
      * @return this for method chaining.
      */
+    public TaskBuilder millisecondsRemaining(Long millisecondsRemaining);
     public TaskBuilder millisecondsRemaining(long millisecondsRemaining);
     /**
      * @return a new TaskInfo with the fields updated.
