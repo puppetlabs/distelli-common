@@ -77,5 +77,11 @@
       <scope>compile</scope>
     </dependency>
 
+    <dependency>
+      <groupId>com.distelli.persistence</groupId>
+      <artifactId>persistence-api</artifactId>
+      <version>3.5.4</version>
+    </dependency>
+
   </dependencies>
 </project>
