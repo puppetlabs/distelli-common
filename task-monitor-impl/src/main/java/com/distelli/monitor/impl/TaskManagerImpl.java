@@ -817,6 +817,7 @@ public class TaskManagerImpl implements TaskManager {
                     .when((expr) -> expr.exists("mid"));
             } catch ( RollbackException ex ) {
                 LOG.debug("Unable to increment agn field of lockId="+lockId+", checking if task is now terminal");
+                // TODO: Make this a consistent read!
                 state = getTaskState(_tasks.getItem(prerequisiteId));
                 if ( state.isTerminal() ) {
                     // Task completed (and removed the lockId, TASK_ID_NONE field):
