@@ -47,6 +47,8 @@ import javax.persistence.RollbackException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.distelli.persistence.AttrType;
+import java.util.function.Predicate;
+import java.util.function.Consumer;
 import static com.distelli.utils.LongSortKey.*;
 
 /**
@@ -67,7 +69,6 @@ public class TaskManagerImpl implements TaskManager {
     private static final String MONITOR_ID_QUEUED = "#";
     private static final String MONITOR_ID_WAITING = "$";
     private static final Logger LOG = LoggerFactory.getLogger(TaskManagerImpl.class);
-    private static Collection<String> TERMINAL_STATES;
 
     @Inject
     private Monitor _monitor;
@@ -101,6 +102,11 @@ public class TaskManagerImpl implements TaskManager {
     private long _lastRunTask = 0;
     // synchronized(this):
     private Future<?> _runNextTaskFuture = null;
+
+    private Set<Consumer<TaskInfo>> _onTerminalState =
+        Collections.synchronizedSet(new HashSet<Consumer<TaskInfo>>());
+
+    private Predicate<TaskInfo> _taskMatches;
 
     private static class DelayedTask {
         private DelayedTask(long millisRemaining) {
@@ -303,6 +309,14 @@ public class TaskManagerImpl implements TaskManager {
 
     @Override
     public synchronized void monitorTaskQueue() {
+        monitorTaskQueueFor(null);
+    }
+
+    @Override
+    public synchronized void monitorTaskQueueFor(
+        Predicate<TaskInfo> taskMatches)
+    {
+        _taskMatches = ( null == taskMatches ) ? (info) -> true : taskMatches;
         if ( null != _monitorTasks ) return;
         if ( null == _executor ) return;
         _monitorTasks = _executor.scheduleAtFixedRate(
@@ -310,6 +324,16 @@ public class TaskManagerImpl implements TaskManager {
             ThreadLocalRandom.current().nextLong(POLL_INTERVAL_MS),
             POLL_INTERVAL_MS,
             TimeUnit.MILLISECONDS);
+    }
+
+    @Override
+    public void addOnTerminalState(Consumer<TaskInfo> onTerminalState) {
+        _onTerminalState.add(onTerminalState);
+    }
+
+    @Override
+    public void removeOnTerminalState(Consumer<TaskInfo> onTerminalState) {
+        _onTerminalState.remove(onTerminalState);
     }
 
     @Override
@@ -506,14 +530,18 @@ public class TaskManagerImpl implements TaskManager {
         task.taskState = toTaskState(state);
     }
 
-    private synchronized static Collection<String> getTerminalStates() {
-        if ( null == TERMINAL_STATES ) {
-            TERMINAL_STATES = new ArrayList<>();
-            for ( TaskState state : TaskState.values() ) {
-                if ( state.isTerminal() ) TERMINAL_STATES.add(toString(state));
+    private void onTerminalState(TaskInfo terminalTask) {
+        synchronized ( _onTerminalState ) {
+            for ( Consumer<TaskInfo> consumer : _onTerminalState ) {
+                try {
+                    consumer.accept(terminalTask);
+                } catch ( Throwable ex ) {
+                    LOG.error(
+                        "OnTerminalState["+consumer+"]("+terminalTask+") FAILED: "+ex.getMessage(),
+                        ex);
+                }
             }
         }
-        return TERMINAL_STATES;
     }
 
     private static String toString(TaskState taskState) {
@@ -706,6 +734,7 @@ public class TaskManagerImpl implements TaskManager {
             boolean taskSubmitted = false;
             for ( PageIterator iter : new PageIterator().pageSize(100) ) {
                 for ( Task task : _tasksForMonitor.queryItems(MONITOR_ID_QUEUED, iter).list(Arrays.asList("id")) ) {
+                    if ( ! _taskMatches.test(task) ) continue;
                     submitRunTask(task.getTaskId());
                     taskSubmitted = true;
                 }
@@ -1038,6 +1067,9 @@ public class TaskManagerImpl implements TaskManager {
                 }
                 if ( interrupted ) {
                     Thread.currentThread().interrupt();
+                }
+                if ( finalTask.getTaskState().isTerminal() ) {
+                    onTerminalState(finalTask);
                 }
             } finally {
                 if ( null != threadName ) {

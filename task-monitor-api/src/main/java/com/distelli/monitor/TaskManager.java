@@ -2,6 +2,8 @@ package com.distelli.monitor;
 
 import com.distelli.persistence.PageIterator;
 import java.util.List;
+import java.util.function.Predicate;
+import java.util.function.Consumer;
 
 /**
  * The primary API into scheduling new tasks and obtaining information about tasks.
@@ -149,6 +151,18 @@ public interface TaskManager {
      * monitoring for tasks in this JVM, then nothing happens.
      */
     public void monitorTaskQueue();
+
+    /**
+     * Constrain task queue monitoring to only entities that match
+     * the BiPredicate.
+     */
+    public void monitorTaskQueueFor(Predicate<TaskInfo> taskMatches);
+
+    /**
+     * Call this function when a task enters a terminal state.
+     */
+    public void addOnTerminalState(Consumer<TaskInfo> onTerminalState);
+    public void removeOnTerminalState(Consumer<TaskInfo> onTerminalState);
 
     /**
      * Stop monitoring for tasks in the current JVM. If the JVM is not
