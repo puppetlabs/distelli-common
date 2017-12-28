@@ -733,7 +733,7 @@ public class TaskManagerImpl implements TaskManager {
         try {
             boolean taskSubmitted = false;
             for ( PageIterator iter : new PageIterator().pageSize(100) ) {
-                for ( Task task : _tasksForMonitor.queryItems(MONITOR_ID_QUEUED, iter).list(Arrays.asList("id")) ) {
+                for ( Task task : _tasksForMonitor.queryItems(MONITOR_ID_QUEUED, iter).list() ) {
                     if ( ! _taskMatches.test(task) ) continue;
                     submitRunTask(task.getTaskId());
                     taskSubmitted = true;
