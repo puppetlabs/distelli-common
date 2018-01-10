@@ -27,6 +27,7 @@ public class RequestContext
     protected Map<String, List<String>> _queryParams = null;
     protected MatchedRoute _matchedRoute;
     protected HTTPMethod _httpMethod = null;
+    protected String _scheme = null;
     protected String _path = null;
     protected String _originalPath = null;
     protected String _queryString = null;
@@ -52,6 +53,8 @@ public class RequestContext
         _headers = extractHeaders(request);
         loadQueryParams(request.getParameterMap());
         _httpMethod = httpMethod;
+
+        _scheme = request.getScheme();
 
         _originalPath = request.getRequestURI();
         _path = _originalPath;
@@ -200,6 +203,7 @@ public class RequestContext
 
     public String getProto() {
         String proto = getHeaderValue("x-forwarded-proto");
+        if ( null == proto ) proto = _scheme;
         if ( null == proto ) return "http";
         return proto;
     }
