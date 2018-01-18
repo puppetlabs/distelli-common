@@ -24,6 +24,9 @@ public class HTMLCharacterEscapes extends CharacterEscapes
     // and this for others; we don't need anything special here
     @Override public SerializableString getEscapeSequence(int ch) {
         // no further escaping (beyond ASCII chars) needed:
-        return new SerializedString("\\/");
+        if ( '/' == ch ) {
+            return new SerializedString("\\/");
+        }
+        return null;
     }
 }
