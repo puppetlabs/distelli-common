@@ -46,8 +46,8 @@ publish: has-distelli-config git-is-clean git-is-master git-pull-needed
 	. ~/.distelli.config && \
 		mvn versions:set -DgenerateBackupPoms=false -DnewVersion=$(NEW_VERSION) && \
 		git commit -am '[skip ci][release:prepare] prepare release $(PACKAGE_NAME)-$(NEW_VERSION)' && \
-		git tag -m 'Preparing new release $(PACKAGE_NAME)-$(NEW_VERSION)' -a '$(PACKAGE_NAME)-$(NEW_VERSION)' && \
 		mvn clean test deploy && \
+		git tag -m 'Preparing new release $(PACKAGE_NAME)-$(NEW_VERSION)' -a '$(PACKAGE_NAME)-$(NEW_VERSION)' && \
 		mvn versions:set -DgenerateBackupPoms=false -DnewVersion=$(NEXT_SNAPSHOT) && \
 		git commit -am '[skip ci][release:perform] prepare for next development iteration' && \
 		git push --follow-tags

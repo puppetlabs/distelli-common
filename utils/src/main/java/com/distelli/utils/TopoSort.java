@@ -55,6 +55,8 @@ public class TopoSort<T extends Comparable> {
     /**
      * @param node - a node that may not have any dependencies, but should
      *        be listed in the output.
+     *
+     * @return this
      */
     public TopoSort<T> add(T node) {
         _nodes.add(node);
@@ -65,6 +67,8 @@ public class TopoSort<T extends Comparable> {
      * @param node - a node to add to the graph.
      *
      * @param dependencies - a collection of dependencies needed by node.
+     *
+     * @return this
      */
     public TopoSort<T> add(T node, Collection<? extends T> dependencies) {
         _nodes.add(node);
@@ -79,6 +83,8 @@ public class TopoSort<T extends Comparable> {
      * @param node - the source node.
      *
      * @param dependency - the node that source depends on.
+     *
+     * @return this
      */
     public TopoSort<T> add(T node, T dependency) {
         _nodes.add(node);
@@ -169,6 +175,10 @@ public class TopoSort<T extends Comparable> {
     /**
      * Removes a node from the graph, adding any transitive edges
      * in order to maintain the pre-existing relationships.
+     *
+     * @param node is the node to be removed
+     *
+     * @return this
      */
     public TopoSort<T> remove(T node) {
         _nodes.remove(node);
