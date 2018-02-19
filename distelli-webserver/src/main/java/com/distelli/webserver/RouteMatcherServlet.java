@@ -7,7 +7,7 @@ import javax.servlet.ServletException;
 import java.io.IOException;
 
 public class RouteMatcherServlet extends HttpServlet implements GenericRequestHandler {
-    public static final String MATCHED_ROUTE = "com.distelli.webserver.MatchedRoute";
+    public static final String MATCHED_ROUTE = "com.distelli.webserver.GenericMatchedRoute";
     private GenericRouteMatcher<GenericRequestHandler> routeMatcher;
     public RouteMatcherServlet(GenericRouteMatcher<GenericRequestHandler> routeMatcher) {
         this.routeMatcher = routeMatcher;
