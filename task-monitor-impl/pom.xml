@@ -3,7 +3,7 @@
 
   <groupId>com.distelli.monitor</groupId>
   <artifactId>task-monitor-impl</artifactId>
-  <version>9.15.1-SNAPSHOT</version>
+  <version>9.15.1</version>
   <packaging>jar</packaging>
 
   <name>task-monitor-impl</name>
@@ -11,7 +11,7 @@
   <parent>
     <groupId>com.distelli.common</groupId>
     <artifactId>distelli-common-pom</artifactId>
-    <version>9.15.1-SNAPSHOT</version>
+    <version>9.15.1</version>
   </parent>
 
   <build>
@@ -51,13 +51,13 @@
     <dependency>
       <groupId>com.distelli.monitor</groupId>
       <artifactId>task-monitor-api</artifactId>
-      <version>9.15.1-SNAPSHOT</version>
+      <version>9.15.1</version>
     </dependency>
 
     <dependency>
       <groupId>com.distelli.utils</groupId>
       <artifactId>Utilities</artifactId>
-      <version>9.15.1-SNAPSHOT</version>
+      <version>9.15.1</version>
     </dependency>
 
     <dependency>
