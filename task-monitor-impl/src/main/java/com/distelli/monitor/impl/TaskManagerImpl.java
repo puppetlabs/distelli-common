@@ -65,6 +65,9 @@ import static com.distelli.utils.LongSortKey.*;
 public class TaskManagerImpl implements TaskManager {
     private static final int POLL_INTERVAL_MS = 10000;
     private static final int MAX_TASKS_IN_INTERVAL = 10;
+    // Every POLL_INTERVAL_MS*CLEANUP_INTERVALS we perform a scan
+    // to see if we need to do some cleanup:
+    private static final int CLEANUP_INTERVALS = 30;
     private static final String TASK_ID_NONE = "#";
     private static final String MONITOR_ID_QUEUED = "#";
     private static final String MONITOR_ID_WAITING = "$";
@@ -108,6 +111,9 @@ public class TaskManagerImpl implements TaskManager {
 
     private Predicate<TaskInfo> _taskMatches;
 
+    private AtomicInteger _pollCount = new AtomicInteger(
+        ThreadLocalRandom.current().nextInt(0, CLEANUP_INTERVALS-1));
+
     private static class DelayedTask {
         private DelayedTask(long millisRemaining) {
             this.millisTimeBegin = milliTime();
@@ -123,21 +129,26 @@ public class TaskManagerImpl implements TaskManager {
                 .tableName("monitor-tasks")
                 // Query on task id:
                 .index((idx) -> idx
+                       .readCapacity(2L)
+                       .writeCapacity(12L)
                        .hashKey("id", AttrType.NUM))
                 // Query on monitor ids, or "special" state:
                 //    '#' - Runnable
                 //    '$' - Waiting on lock/prequisite
                 .index((idx) -> idx
+                       .writeCapacity(6L)
                        .indexName("mid-id-index")
                        .hashKey("mid", AttrType.STR)
                        .rangeKey("id", AttrType.NUM))
                 // Query on entities:
                 .index((idx) -> idx
+                       .writeCapacity(6L)
                        .indexName("ety-eid-index")
                        .hashKey("ety", AttrType.STR)
                        .rangeKey("eid", AttrType.STR))
                 // Same as above, but only include non-terminals:
                 .index((idx) -> idx
+                       .writeCapacity(6L)
                        .indexName("ntty-ntid-index")
                        .hashKey("ntty", AttrType.STR)
                        .rangeKey("ntid", AttrType.STR))
@@ -153,12 +164,13 @@ public class TaskManagerImpl implements TaskManager {
                 .tableName("monitor-locks")
                 .index((idx) -> idx
                        // We do a LOT of writing on this table!
-                       .writeCapacity(2L)
+                       .writeCapacity(8L)
                        .hashKey("lid", AttrType.STR)
                        // "actual" locks have tid=TASK_ID_NONE:
                        .rangeKey("tid", AttrType.STR))
                 // Query on monitor ids:
                 .index((idx) -> idx
+                       .writeCapacity(3L)
                        .indexName("mid-index")
                        .hashKey("mid", AttrType.STR))
                 .build();
@@ -742,6 +754,11 @@ public class TaskManagerImpl implements TaskManager {
             if ( taskSubmitted ) {
                 submit(this::runNextTask);
             }
+
+            if ( 0 == _pollCount.incrementAndGet() % CLEANUP_INTERVALS ) {
+                doCleanup();
+            }
+
             // TODO: Occassionally find all MONITOR_ID_WAITING tasks to check if
             // cleanup needs to happen?
 
@@ -749,6 +766,114 @@ public class TaskManagerImpl implements TaskManager {
         } catch ( Throwable ex ) {
             LOG.error(ex.getMessage(), ex);
         }
+    }
+
+    private void doCleanup() {
+        _monitor.monitor(this::doCleanup);
+    }
+    private void doCleanup(MonitorInfo monitorInfo) {
+        // Delete all lid=... tid=TASK_ID_NONE, rtid=terminalStateTaskId,
+        // mid=... entries (this "force" breaks locks):
+        Map<String, Boolean> lockedIds = new HashMap<>();
+        Map<Long, Boolean> taskInTerminalState = new HashMap<>();
+        for ( PageIterator it : new PageIterator().pageSize(100) ) {
+            for ( Lock lock :  _locksForMonitor.scanItems(it) ) {
+                if ( null == lock.runningTaskId ) continue;
+                if ( ! TASK_ID_NONE.equals(lock.taskId) ) continue;
+                if ( Boolean.FALSE == taskInTerminalState.computeIfAbsent(
+                         lock.runningTaskId, this::isTerminalTaskId) )
+                {
+                    lockedIds.put(lock.lockId, Boolean.TRUE);
+                    continue;
+                }
+                // Simply delete the lock. Note that this will cause
+                // waiting tasks to never run, however our next cleanup
+                // task is to find tasks that are waiting and
+                // clean them up, so we should be "okay".
+                try {
+                    _locks.deleteItem(
+                        lock.lockId,
+                        lock.taskId,
+                        (expr) -> expr.and(
+                            expr.eq("mid", lock.monitorId),
+                            expr.and(
+                                expr.eq("rtid", lock.runningTaskId),
+                                expr.eq("agn", lock.tasksQueued))));
+                    lockedIds.put(lock.lockId, Boolean.FALSE);
+                    LOG.error("Found lockId="+lock.lockId+" was NOT removed, even though taskId="+
+                              lock.runningTaskId+" is in a terminal state!");
+                } catch ( RollbackException ex ) {
+                    lockedIds.put(lock.lockId, Boolean.TRUE);
+                    LOG.debug("Found lockId="+lock.lockId+" was already updated");
+                }
+            }
+        }
+
+        // Find tasks with mid=MONITOR_ID_WAITING and see if they should be MONITOR_ID_QUEUED.
+        for ( PageIterator it : new PageIterator().pageSize(100) ) {
+            for ( Task task : _tasksForMonitor.queryItems(MONITOR_ID_WAITING, it).list(
+                      Arrays.asList(
+                          "id", "any", "preq", "lids", "stat")) )
+            {
+                boolean anyPrereq = task.isAnyPrerequisiteTaskId();
+                boolean unblock = ( anyPrereq ) ? false : true;
+                for ( Long prereqTaskId : task.getPrerequisiteTaskIds() ) {
+                    Boolean isTerminal = taskInTerminalState.computeIfAbsent(
+                        prereqTaskId, this::isTerminalTaskId);
+                    if ( anyPrereq ) {
+                        if ( Boolean.TRUE == isTerminal ) {
+                            unblock = true;
+                            break;
+                        }
+                    } else if ( Boolean.FALSE == isTerminal ) {
+                        unblock = false;
+                        break;
+                    }
+                }
+                // Still waiting for prerequisites:
+                if ( ! unblock ) continue;
+                // Check locks are free:
+                for ( String lockId : task.getLockIds() ) {
+                    if ( Boolean.TRUE == lockedIds.computeIfAbsent(
+                             lockId, this::isLocked) )
+                    {
+                        // Still waiting to obtain lock:
+                        continue;
+                    }
+                }
+                // set mid="#"!
+                try {
+                    _tasks.updateItem(task.getTaskId(), null)
+                        .set("mid", "#")
+                        .when((expr) -> expr.eq("mid", "$"));
+                    LOG.error(
+                        "Found taskId="+task.getTaskId()+
+                        " was NOT enqueued, even though all prerequisite tasks ("+
+                        task.getPrerequisiteTaskIds()+") are satisfied and all locks ("+
+                        task.getLockIds()+") are available!");
+                } catch ( RollbackException ex ) {
+                    LOG.debug("Found taskId="+task.getTaskId()+" was already enqueued");
+                }
+            }
+        }
+    }
+
+    private boolean isTerminalTaskId(long taskId) {
+        return getTaskState(
+            _tasks.getItem(
+                taskId,
+                null,
+                Arrays.asList("stat"),
+                Task.class))
+            .isTerminal();
+    }
+
+    private boolean isLocked(String lockId) {
+        return null != _locks.getItem(
+            lockId,
+            TASK_ID_NONE,
+            Arrays.asList("lid"),
+            Lock.class);
     }
 
     private void updateDelayedTask(final long taskId, MonitorInfo monitorInfo) {
