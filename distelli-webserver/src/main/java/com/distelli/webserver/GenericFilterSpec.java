@@ -41,7 +41,11 @@ public class GenericFilterSpec<T> implements Comparable<GenericFilterSpec<T>>
             return withAfter(Arrays.asList(names));
         }
         public Builder<T, FS> withAfter(Collection<String> names) {
-            proto()._after = Collections.unmodifiableSet(new LinkedHashSet<>(names));
+            if ( null == names ) {
+                proto()._after = Collections.emptySet();
+            } else {
+                proto()._after = Collections.unmodifiableSet(new LinkedHashSet<>(names));
+            }
             return this;
         }
         public Builder<T, FS> withValue(T value) {
