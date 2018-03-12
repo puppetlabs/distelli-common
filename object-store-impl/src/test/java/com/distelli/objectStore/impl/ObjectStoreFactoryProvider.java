@@ -32,7 +32,7 @@ public class ObjectStoreFactoryProvider implements Provider<ObjectStore.Factory>
             @Override
             public ObjectStore.Builder create() {
                 return _baseObjectStoreFactory.create()
-                    .withObjectStoreType(ObjectStoreType.S3)
+                    .withObjectStoreType(_osType)
                     .withEndpoint(endpoint)
                     .withCredProvider(credProvider);
             }

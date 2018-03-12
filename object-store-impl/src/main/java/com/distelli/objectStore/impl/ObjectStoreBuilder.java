@@ -7,6 +7,7 @@ import javax.inject.Inject;
 import com.distelli.cred.CredProvider;
 import com.distelli.objectStore.*;
 import com.distelli.objectStore.impl.s3.S3ObjectStore;
+import com.distelli.objectStore.impl.artifactory.ArtifactoryObjectStore;
 import com.distelli.objectStore.impl.disk.DiskObjectStore;
 
 public class ObjectStoreBuilder implements ObjectStore.Builder {
@@ -26,6 +27,8 @@ public class ObjectStoreBuilder implements ObjectStore.Builder {
     private S3ObjectStore.Factory _s3Factory;
     @Inject
     private DiskObjectStore.Factory _diskFactory;
+    @Inject
+    private ArtifactoryObjectStore.Factory _artifactoryFactory;
 
     @Override
     public ObjectStore.Builder withEndpoint(URI endpoint) {
@@ -76,6 +79,8 @@ public class ObjectStoreBuilder implements ObjectStore.Builder {
             return _s3Factory.create(this);
         case DISK:
             return _diskFactory.create(this);
+        case ARTIFACTORY:
+            return _artifactoryFactory.create(this);
         default:
             throw(new RuntimeException("Unsupported ObjectStore Provider: "+objectStoreProvider));
         }
