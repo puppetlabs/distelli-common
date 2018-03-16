@@ -14,6 +14,7 @@ import java.util.HashMap;
 import com.distelli.webserver.JsonError;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -24,6 +25,12 @@ public class AjaxRequest
     static {
         OBJECT_MAPPER.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         OBJECT_MAPPER.configure(DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL, true);
+        // Hack, so we can use DataNode :(.
+        try {
+            OBJECT_MAPPER.registerModule(
+                (Module)Class.forName("com.distelli.apigen.jackson.DataNodeModule").newInstance());
+        } catch ( ReflectiveOperationException ex ) {}
+        // TODO: String escaping for </script> in getContentAsString()?
     }
 
     protected String operation = null;

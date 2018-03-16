@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.module.mrbean.MrBeanModule;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -32,6 +33,11 @@ public class WebResponse
         OBJECT_MAPPER.registerModule(new MrBeanModule());
         OBJECT_MAPPER.setSerializationInclusion(JsonInclude.Include.NON_NULL);
         OBJECT_MAPPER.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+        // Hack, so we can use DataNode :(.
+        try {
+            OBJECT_MAPPER.registerModule(
+                (Module)Class.forName("com.distelli.apigen.jackson.DataNodeModule").newInstance());
+        } catch ( ReflectiveOperationException ex ) {}
     }
 
     public WebResponse() {}
