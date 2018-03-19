@@ -106,16 +106,24 @@ public class AjaxRequest
     public <T> T convertContent(String jsonPointer, Class<T> clazz, boolean throwIfNull)
     {
         T contentObj = null;
-        if(this.content != null)
+        if(this.content == null)
         {
-            JsonNode dataNode = this.content.at(jsonPointer);
-            if(!dataNode.isMissingNode())
-                contentObj= OBJECT_MAPPER.convertValue(dataNode, clazz);
-            if(contentObj != null)
-                return contentObj;
+            if(throwIfNull) {
+                throw new AjaxClientException(JsonError.BadContent);
+            }
+            return null;
         }
-        if(throwIfNull)
-            throw(new AjaxClientException(JsonError.BadContent));
+        JsonNode dataNode = this.content.at(jsonPointer);
+        if(!dataNode.isMissingNode())
+            contentObj= OBJECT_MAPPER.convertValue(dataNode, clazz);
+        if(contentObj != null)
+            return contentObj;
+        if(throwIfNull) {
+            throw new AjaxClientException(
+                "The content field '"+jsonPointer+"' is missing or invalid",
+                JsonError.Codes.BadContent,
+                400);
+        }
         return null;
     }
 
