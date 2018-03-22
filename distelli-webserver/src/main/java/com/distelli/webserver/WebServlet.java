@@ -145,6 +145,25 @@ public class WebServlet<RCTX extends RequestContext> extends HttpServlet
 
             requestContext.setMatchedRoute(route);
             webResponse = runFilters(route, requestContext);
+        }
+        catch(WebClientException wce)
+        {
+            //override the webResponse
+            if(log.isDebugEnabled())
+                log.debug("Caught WebClientException: "+wce.getMessage(), wce);
+            webResponse = new WebResponse(400);
+            String msg = wce.getMessage();
+            if(msg != null && webResponse != null)
+                webResponse.setResponseContent(msg.getBytes());
+        }
+        catch(Throwable t)
+        {
+            log.error(t.getMessage(), t);
+            throw(new ServletException(t));
+        }
+
+        try
+        {
             if(webResponse != null)
             {
                 if(log.isDebugEnabled())
@@ -179,16 +198,6 @@ public class WebServlet<RCTX extends RequestContext> extends HttpServlet
                 for(Cookie cookie : webResponse.getCookies())
                     response.addCookie(cookie);
             }
-        }
-        catch(WebClientException wce)
-        {
-            //override the webResponse
-            if(log.isDebugEnabled())
-                log.debug("Caught WebClientException: "+wce.getMessage(), wce);
-            webResponse = new WebResponse(400);
-            String msg = wce.getMessage();
-            if(msg != null && webResponse != null)
-                webResponse.setResponseContent(msg.getBytes());
         }
         catch(Throwable t)
         {
