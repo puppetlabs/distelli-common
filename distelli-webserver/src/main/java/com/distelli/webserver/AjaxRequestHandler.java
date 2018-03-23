@@ -81,8 +81,13 @@ public class AjaxRequestHandler extends RequestHandler
                 return jsonError(jsonError);
             return jsonError(JsonError.MalformedRequest);
         } catch(Throwable t) {
-            log.error(t.getMessage(), t);
-            return jsonError(JsonError.InternalServerError);
+            String errorId = generateErrorId();
+            log.error("errorId="+errorId+" "+t.getMessage(), t);
+            return jsonError(
+                new JsonError(
+                    "Please contact the site administrator for support along with errorId="+errorId,
+                    JsonError.Codes.InternalServerError,
+                    500));
         }
     }
 }
