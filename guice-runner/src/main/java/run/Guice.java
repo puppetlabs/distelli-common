@@ -1,5 +1,10 @@
 package run;
 
+import java.util.Collection;
+import java.util.Map;
+import java.util.function.Predicate;
+import java.util.LinkedHashMap;
+import java.lang.reflect.Method;
 import com.google.inject.Stage;
 import com.google.inject.Module;
 import com.google.inject.Injector;
@@ -7,6 +12,11 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Callable;
+import java.util.AbstractMap.SimpleImmutableEntry;
+import java.util.HashMap;
+import java.lang.reflect.InvocationTargetException;
 
 public class Guice {
     public static void help() {
@@ -47,46 +57,146 @@ public class Guice {
             Stage.PRODUCTION,
             modules.toArray(new Module[modules.size()]));
 
-        int queueSize = args.size() - argIdx;
-        ArrayBlockingQueue<Object> queue = new ArrayBlockingQueue<>(queueSize);
-        for (; argIdx < args.size(); argIdx++ ) {
-            String[] pair = args.get(argIdx).split("=", 2);
+        Map<String, Callable<?>> runs = new LinkedHashMap<>();
+        for ( int i=0; argIdx+i < args.size(); i++ ) {
+            String[] pair = args.get(argIdx+i).split("=", 2);
             int dot = pair[0].lastIndexOf('.');
-
-            Object instance = injector.getInstance(Class.forName(pair[0].substring(0, dot)));
+            if ( dot < 0 ) {
+                throw new IllegalArgumentException("Expected <class>.<method>=value");
+            }
+            String className = pair[0].substring(0, dot);
             String methodName = pair[0].substring(dot+1);
 
-            new Thread(() -> {
-                    Thread.currentThread().setName(pair[0]);
+            Object instance = injector.getInstance(Class.forName(className));
+            Method method;
+            if ( pair.length > 1 ) {
+                method = instance.getClass().getMethod(methodName, String.class);
+            } else {
+                method = instance.getClass().getMethod(methodName);
+            }
+            String threadName = toThreadName(runs::containsKey, className, methodName, i);
+            Method finalMethod = method;
+            runs.put(threadName, () -> {
                     try {
-                        if ( pair.length < 2 ) {
-                            queue.put(
-                                instance.getClass()
-                                .getMethod(methodName)
-                                .invoke(instance));
+                        if ( pair.length > 1 ) {
+                            return method.invoke(instance, pair[1]);
                         } else {
-                            queue.put(
-                                instance.getClass()
-                                .getMethod(methodName, String.class)
-                                .invoke(instance, pair[1]));
+                            return method.invoke(instance);
                         }
-                    } catch ( Throwable ex ) {
-                        try {
-                            queue.put(ex);
-                        } catch ( Throwable ignored ) {
-                            ex.printStackTrace();
-                            System.exit(-1);
+                    } catch ( InvocationTargetException ex ) {
+                        if ( ex.getCause() instanceof Exception ) {
+                            throw (Exception)ex.getCause();
                         }
+                        throw ex;
                     }
-            }).start();
+                });
         }
-        while ( queueSize-- > 0 ) {
-            Object result = queue.take();
+
+        int exitCode = 0;
+        Map<String, Object> results = run(injector, runs);
+        for ( String threadName : runs.keySet() ) {
+            Object result = results.get(threadName);
             if ( result instanceof Throwable ) {
-                throw (Throwable)result;
+                exitCode = -1;
+                System.err.println("FATAL["+threadName+"]");
+                ((Throwable)result).printStackTrace(System.err);
             } else if ( null != result ) {
                 System.out.println(result.toString());
             }
         }
+        System.exit(exitCode);
     }
+
+
+    private static Map<String, Object> run(Injector injector, Map<String, Callable<?>> runs) throws InterruptedException {
+        ArrayBlockingQueue<Map.Entry<String, Object>> queue = new ArrayBlockingQueue<>(runs.size());
+        Map<String, Thread> allThreads = new HashMap<>();
+        for ( Map.Entry<String, Callable<?>> runEntry : runs.entrySet() ) {
+            Thread thread = new Thread(
+                () -> {
+                    Object result = null;
+                    try {
+                        try {
+                            Thread.currentThread().setName(runEntry.getKey());
+                            result = runEntry.getValue().call();
+                        } catch ( Throwable ex ) {
+                            if ( ! ( ex instanceof InterruptedException ) ) {
+                                result = ex;
+                            }
+                        }
+                    } finally {
+                        try {
+                            Map.Entry entry = new SimpleImmutableEntry(
+                                runEntry.getKey(),
+                                result);
+                            for ( int retry=0;; retry++ ) {
+                                try {
+                                    queue.put(entry);
+                                    break;
+                                } catch ( InterruptedException ex ) {
+                                    if ( retry > 3 ) throw ex;
+                                }
+                                // simply retry on interruptions...
+                            }
+                        } catch ( Throwable ex ) {
+                            System.err.println("FATAL["+runEntry.getKey()+"]");
+                            ex.printStackTrace(System.err);
+                            System.exit(-1); // force shutdown of process...
+                        }
+                    }
+                });
+            allThreads.put(runEntry.getKey(), thread);
+            thread.start();
+        }
+        Map<String, Object> results = new HashMap<>();
+        while ( ! allThreads.isEmpty() ) {
+            Map.Entry<String, Object> resultEntry = queue.take();
+            results.put(resultEntry.getKey(), resultEntry.getValue());
+            allThreads.remove(resultEntry.getKey());
+            if ( resultEntry.getValue() instanceof Throwable ) {
+                if ( ! stopThreads(allThreads.values()) ) {
+                    break;
+                }
+            }
+        }
+        return results;
+    }
+
+    private static String toThreadName(Predicate<Object> exists, String className, String methodName, int index) {
+        int dot = className.lastIndexOf('.');
+        String threadName = ( dot >= 0 ) ? className.substring(dot+1) : className;
+        if ( ! exists.test(threadName) ) return threadName;
+        threadName = threadName + "." + methodName;
+        if ( ! exists.test(threadName) ) return threadName;
+        threadName = threadName + "." + index;
+        if ( exists.test(threadName) ) {
+            throw new IllegalStateException("Unable to come up with unique threadName!");
+        }
+        return threadName;
+    }
+
+    private static long timeMillis() {
+        return TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
+    }
+
+    private static final long MAX_WAIT_MILLIS = 10000;
+
+    private static boolean stopThreads(Collection<Thread> allThreads) throws InterruptedException {
+        for ( Thread thread : allThreads ) {
+            thread.interrupt();
+        }
+        boolean success = true;
+        long waitTime = MAX_WAIT_MILLIS;
+        for ( Thread thread : allThreads ) {
+            long startTime = timeMillis();
+            thread.join(waitTime);
+            waitTime -= (timeMillis() - startTime);
+            if ( waitTime < 1 ) {
+                success = false;
+                break;
+            }
+        }
+        return success;
+    }
+
 }
