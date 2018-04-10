@@ -166,12 +166,12 @@ public class WebServlet<RCTX extends RequestContext> extends HttpServlet
         {
             if(webResponse != null)
             {
-                if(log.isDebugEnabled())
+                if(log.isDebugEnabled() && null != requestContext)
                     log.debug("Writing HttpStatusCode: "+webResponse.getHttpStatusCode()+
                               " for Request: "+requestContext.getRequestId());
                 response.setStatus(webResponse.getHttpStatusCode());
 
-                if(log.isDebugEnabled())
+                if(log.isDebugEnabled() && null != requestContext)
                     log.debug("Writing ContentType: "+webResponse.getContentType()+
                               " for Request: "+requestContext.getRequestId());
 
@@ -179,7 +179,7 @@ public class WebServlet<RCTX extends RequestContext> extends HttpServlet
                 response.setCharacterEncoding(webResponse.getCharacterEncoding());
 
                 Map<String, String> responseHeaders = webResponse.getResponseHeaders();
-                writeGZipped = requestContext.isGZipAccepted();
+                writeGZipped = null != requestContext && requestContext.isGZipAccepted();
                 if(responseHeaders != null && responseHeaders.size() > 0)
                 {
                     for(Map.Entry<String, String> entry : responseHeaders.entrySet())
