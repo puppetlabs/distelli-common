@@ -350,9 +350,11 @@ public class TaskManagerImpl implements TaskManager {
 
     @Override
     public void stopTaskQueueMonitor(boolean mayInterruptIfRunning) {
+        Set<Future<?>> allFutures = new HashSet<>();
         synchronized ( this ) {
             if ( null == _monitorTasks ) return;
             _monitorTasks.cancel(false);
+            allFutures.add(_monitorTasks);
             _monitorTasks = null;
         }
         for ( Long taskId : _delayedTasks.keySet() ) {
@@ -362,11 +364,25 @@ public class TaskManagerImpl implements TaskManager {
             if ( null != _monitorTasks ) return;
             for ( Future<?> future : _spawnedFutures ) {
                 future.cancel(mayInterruptIfRunning);
+                allFutures.add(future);
             }
             _spawnedFutures.clear();
         }
         try {
-            _capacity.acquire(_maxCapacity);
+            // Ensure cancelation eventually occurs:
+            for ( long seconds = 60;
+                  ! _capacity.tryAcquire(_maxCapacity, seconds, TimeUnit.SECONDS);
+                  seconds = seconds / 2)
+            {
+                for ( Future<?> future : allFutures ) {
+                    // Force!
+                    future.cancel(true);
+                }
+                if ( seconds <= 0 ) {
+                    LOG.error("Failed to cancel task threads!");
+                    return;
+                }
+            }
             _capacity.release(_maxCapacity);
         } catch ( InterruptedException ex ) {
             Thread.currentThread().interrupt();
@@ -755,7 +771,7 @@ public class TaskManagerImpl implements TaskManager {
                 submit(this::runNextTask);
             }
 
-            if ( 0 == _pollCount.incrementAndGet() % CLEANUP_INTERVALS ) {
+            if ( 1 == _pollCount.incrementAndGet() % CLEANUP_INTERVALS ) {
                 doCleanup();
             }
 
@@ -837,10 +853,12 @@ public class TaskManagerImpl implements TaskManager {
                     if ( Boolean.TRUE == lockedIds.computeIfAbsent(
                              lockId, this::isLocked) )
                     {
-                        // Still waiting to obtain lock:
-                        continue;
+                        unblock = false;
+                        break;
                     }
                 }
+                // Still waiting to obtain lock:
+                if ( ! unblock ) continue;
                 // set mid="#"!
                 try {
                     _tasks.updateItem(task.getTaskId(), null)
@@ -868,12 +886,13 @@ public class TaskManagerImpl implements TaskManager {
             .isTerminal();
     }
 
-    private boolean isLocked(String lockId) {
-        return null != _locks.getItem(
+    private Boolean isLocked(String lockId) {
+        Lock lock = _locks.getItem(
             lockId,
             TASK_ID_NONE,
             Arrays.asList("lid"),
             Lock.class);
+        return lock != null;
     }
 
     private void updateDelayedTask(final long taskId, MonitorInfo monitorInfo) {

@@ -42,6 +42,7 @@ class CacheImpl<K, V> implements Cache<K, V> {
 
     private static class Value<V> {
         private Throwable _error;
+        // TODO: Store _value as a SoftReference!
         private Object _value;
         private long _expiresAt;
 
