@@ -3,7 +3,8 @@ package com.distelli.objectStore;
 public enum ObjectStoreType
 {
     S3,
-    DISK;
+    DISK,
+    ARTIFACTORY;
 
     private static final ObjectStoreType[] values = values();
 

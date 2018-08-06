@@ -37,6 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.FileVisitResult;
 import java.nio.file.StandardCopyOption;
+import java.util.Collections;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class DiskObjectStore extends AbstractObjectStore
@@ -207,21 +208,34 @@ public class DiskObjectStore extends AbstractObjectStore
         }
 
         final File objFile = new File(bucketRoot, objectKey.getKey());
-        File parentDir = objFile.getParentFile();
+
+        String beginsWith;
+        File parentDir;
+        File afterFile = null;
+        if ( objectKey.getKey().endsWith("/") || "".equals(objectKey.getKey()) ) {
+            parentDir = objFile;
+            beginsWith = null;
+            if ( null != iterator.getMarker() ) {
+                afterFile = new File(bucketRoot, iterator.getMarker());
+            }
+        } else {
+            parentDir = objFile.getParentFile();
+            beginsWith = objFile.getName();
+            if ( null != iterator.getMarker() ) {
+                afterFile = new File(new File(bucketRoot, beginsWith), iterator.getMarker());
+            }
+        }
         if(parentDir == null || !parentDir.exists()) {
             iterator.setMarker(null);
-            return keys;
+            return Collections.emptyList();
+        }
+        if ( null != afterFile ) {
+            afterFile = bucketRoot.toPath().relativize(afterFile.toPath()).toFile();
         }
 
-        File afterFile = null;
-        if ( null != iterator.getMarker() ) {
-            afterFile = new File(iterator.getMarker());
-        }
-
-        int pageSize = 10;
-        pageSize = iterator.getPageSize();
+        int pageSize = iterator.getPageSize();
         AtomicInteger remaining = new AtomicInteger(pageSize);
-        if ( walk(parentDir, objFile.getName(), 0, afterFile, (file) -> {
+        if ( walk(parentDir, beginsWith, 0, afterFile, (file) -> {
                     ObjectKey elm = toObjectkey(file);
                     if ( remaining.getAndDecrement() <= 0 ) {
                         iterator.setMarker(elm.getKey());
@@ -233,7 +247,7 @@ public class DiskObjectStore extends AbstractObjectStore
         {
             iterator.setMarker(null);
         }
-        return keys;
+        return Collections.unmodifiableList(keys);
     }
 
     @Override
@@ -466,9 +480,9 @@ public class DiskObjectStore extends AbstractObjectStore
                 afterFileDepth++;
             }
             afterFileDepth -= depth;
-            if ( afterFileDepth > 0 ) {
+            if ( afterFileDepth > 1 ) {
                 File afterFileForDepth = afterFile;
-                while ( --afterFileDepth > 0 ) {
+                while ( --afterFileDepth > 1 ) {
                     afterFileForDepth = afterFileForDepth.getParentFile();
                 }
                 afterFileName = afterFileForDepth.getName();

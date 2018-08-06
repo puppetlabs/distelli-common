@@ -80,7 +80,7 @@
     <dependency>
       <groupId>com.distelli.persistence</groupId>
       <artifactId>persistence-api</artifactId>
-      <version>3.5.4</version>
+      <version>3.6.2</version>
     </dependency>
 
   </dependencies>

@@ -51,7 +51,8 @@ public class TestObjectStore {
     public static Collection<Object[]> parameters() {
         return Arrays.asList(new Object[][] {
                 { ObjectStoreType.S3 },
-                { ObjectStoreType.DISK }
+                { ObjectStoreType.DISK },
+                { ObjectStoreType.ARTIFACTORY }
             });
     }
 
@@ -352,6 +353,7 @@ TODO: Use http-client to do a request:
         assertThat(data, equalTo(new String(got, UTF_8)));
         //now get the object details
         ObjectMetadata meta = objectStore.head(key);
+        assertNotNull(meta);
         assertEquals(got.length, Math.toIntExact(meta.getContentLength()));
         assertEquals(key.getKey(), meta.getKey());
         assertEquals(key.getBucket(), meta.getBucket());
