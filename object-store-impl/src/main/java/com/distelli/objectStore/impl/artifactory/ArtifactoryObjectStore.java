@@ -1,5 +1,6 @@
 package com.distelli.objectStore.impl.artifactory;
 
+import com.distelli.utils.CompactUUID;
 import javax.json.Json;
 import javax.json.JsonNumber;
 import javax.json.JsonObject;
@@ -25,6 +26,7 @@ import javax.persistence.EntityNotFoundException;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import com.google.inject.assistedinject.Assisted;
@@ -33,10 +35,18 @@ import javax.inject.Inject;
 import com.distelli.utils.ResettableInputStream;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.io.OutputStream;
+import java.io.InterruptedIOException;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.ExecutionException;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static com.distelli.utils.IsEmpty.isEmpty;
+import static com.distelli.utils.LongSortKey.longToSortKey;
 
 public class ArtifactoryObjectStore extends AbstractObjectStore
 {
@@ -53,6 +63,8 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
 
     private OkHttpClient _client;
     private URI _endpoint;
+    @Inject
+    private ExecutorService _executor;
 
     private HttpUrl.Builder url() {
         return HttpUrl.parse(_endpoint.toString())
@@ -148,7 +160,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
             if ( 400 == res.code() ) return;
             handleErrors(res, ObjectKey.builder().bucket(bucketName).build(), false);
         } catch ( IOException ex ) {
-            throw new RuntimeException(ex);
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -166,7 +178,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
                 handleErrors(res, ObjectKey.builder().bucket(bucketName).build(), false);
             }
         } catch ( IOException ex ) {
-            throw new RuntimeException(ex);
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -175,7 +187,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
         try {
             return new ResettableInputStream(in);
         } catch ( IOException ex ) {
-            throw new RuntimeException(ex);
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -202,13 +214,13 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
             .url(url()
                  .addPathSegment("artifactory")
                  .addPathSegment(objectKey.getBucket())
-                 .addPathSegment(objectKey.getKey())
+                 .addPathSegments(objectKey.getKey())
                  .build())
             .build();
         try ( Response res = _client.newCall(req).execute() ) {
             handleErrors(res, objectKey, true);
         } catch ( IOException ex ) {
-            throw new RuntimeException(ex);
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -240,7 +252,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
                 .bucket(objectKey.getBucket())
                 .build();
         } catch ( IOException ex ) {
-            throw new RuntimeException(ex);
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -271,7 +283,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
                 .build();
             return objectReader.read(meta, res.body().byteStream());
         } catch ( IOException ex ) {
-            throw new RuntimeException(ex);
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -373,7 +385,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
 
             return Collections.unmodifiableList(result);
         } catch ( IOException ex ) {
-            throw new RuntimeException(ex);
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -399,6 +411,15 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
         if ( null == obj ) return null;
         try {
             return obj.getString(field);
+        } catch ( ClassCastException ex ) {
+            return null;
+        }
+    }
+
+    private static String getString(JsonArray arr, int idx) {
+        if ( null == arr ) return null;
+        try {
+            return arr.getString(idx);
         } catch ( ClassCastException ex ) {
             return null;
         }
@@ -448,7 +469,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
                 handleErrors(res, objectKey, true);
             }
         } catch ( IOException ex ) {
-            throw new RuntimeException(ex);
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -456,6 +477,8 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
     public URI createSignedGet(ObjectKey objectKey, long timeout, TimeUnit unit)
         throws EntityNotFoundException
     {
+        // TODO: Use "Create Token" API, generate a URL with the
+        // username & password of the URI set.
         return url()
             .addPathSegment("artifactory")
             .addPathSegment(objectKey.getBucket())
@@ -466,25 +489,127 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
 
     @Override
     public ObjectPartKey newMultipartPut(ObjectKey objectKey) {
-        throw new UnsupportedOperationException();
+        ObjectPartKey partKey = ObjectPartKey.builder()
+            .bucket(objectKey.getBucket())
+            .key(objectKey.getKey())
+            .uploadId(CompactUUID.randomUUID()+"")
+            .build();
+
+        ObjectKey dirKey = getMultipartKey(partKey, null);
+        put(ObjectKey.builder()
+            .bucket(dirKey.getBucket())
+            .key(dirKey.getKey())
+            .build(),
+            objectKey.getKey().getBytes(UTF_8));
+        return partKey;
     }
 
-    private ObjectPartKey newMultipartPutThrows(ObjectKey objectKey) throws IOException {
-        throw new UnsupportedOperationException();
+    private ObjectKey getMultipartKey(ObjectPartKey partKey, Integer partNum) {
+        String suffix = ( null == partNum ) ?
+            ".KEY" : String.format("%03d.part", partNum);
+        return ObjectKey.builder()
+            .bucket(partKey.getBucket())
+            .key(".MULTIPARTPUT/"+partKey.getUploadId() + suffix)
+            .build();
+    }
+
+    private void validate(ObjectPartKey partKey) {
+        ObjectKey dirKey = getMultipartKey(partKey, null);
+        byte[] content;
+        try {
+            content = get(dirKey);
+        } catch ( IOException ex ) {
+            throw new UncheckedIOException(ex);
+        }
+        String key = new String(content, UTF_8);
+        if ( ! key.equals(partKey.getKey()) ) {
+            throw new EntityNotFoundException(
+                "NotFound: expected partKey="+key+", but got="+partKey.getKey());
+        }
     }
 
     @Override
     public ObjectPartId multipartPut(ObjectPartKey partKey, int partNum, long contentLength, InputStream in) {
-        throw new UnsupportedOperationException();
+        validate(partKey);
+        put(getMultipartKey(partKey, partNum),
+            contentLength,
+            in);
+        return ObjectPartId.builder()
+            .partNum(partNum)
+            .build();
     }
 
     @Override
     public void abortPut(ObjectPartKey partKey) {
-        throw new UnsupportedOperationException();
+        try {
+            validate(partKey);
+        } catch ( EntityNotFoundException ex ) {
+            return;
+        }
+        delete(getMultipartKey(partKey, null));
     }
 
     @Override
     public void completePut(ObjectPartKey partKey, List<ObjectPartId> partIds) {
-        throw new UnsupportedOperationException();
+        validate(partKey);
+
+        // [1] calculate the content length (and validate part ids):
+        long contentLength = 0;
+        for ( ObjectPartId partId : partIds ) {
+            if ( null == partId.getPartNum() ) {
+                throw new IllegalArgumentException(
+                    "Null partNum is not allowed in completePut("+partKey+")");
+            }
+            ObjectMetadata meta = head(getMultipartKey(partKey, partId.getPartNum()));
+            contentLength += meta.getContentLength();
+        }
+
+        ObjectKey objectKey = ObjectKey.builder()
+            .bucket(partKey.getBucket())
+            .key(partKey.getKey())
+            .build();
+
+        // [2] Open upload stream:
+        try ( PipedInputStream in = new PipedInputStream();
+              PipedOutputStream out = new PipedOutputStream() )
+        {
+            in.connect(out);
+
+            long finalContentLength = contentLength;
+            Future<?> future = _executor.submit(() -> put(objectKey, finalContentLength, in));
+
+            for ( ObjectPartId partId : partIds ) {
+                get(getMultipartKey(partKey, partId.getPartNum()),
+                    (meta, is) -> transferTo(is, out));
+            }
+            out.close();
+            try {
+                future.get();
+            } catch ( InterruptedException|ExecutionException ex ) {
+                // TODO: Handle these differently?
+                throw new RuntimeException(ex);
+            }
+        } catch ( IOException ex ) {
+            throw new UncheckedIOException(ex);
+        }
+
+        // [3] Iterate over the parts and push to the upload stream.
+        abortPut(partKey);
+    }
+
+    private long transferTo(InputStream is, OutputStream out) throws IOException {
+        long total = 0L;
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = is.read(buf)) > 0) {
+            out.write(buf, 0, n);
+            total += n;
+            if ( Thread.interrupted() ) {
+                InterruptedIOException ex = new InterruptedIOException();
+                ex.bytesTransferred = (int)total;
+                throw ex;
+            }
+        }
+        return total;
     }
 }

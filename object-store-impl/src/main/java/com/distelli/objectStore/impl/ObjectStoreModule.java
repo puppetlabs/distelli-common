@@ -8,6 +8,7 @@ import com.distelli.objectStore.impl.disk.DiskObjectStore;
 import com.distelli.objectStore.impl.artifactory.ArtifactoryObjectStore;
 import com.google.inject.assistedinject.FactoryModuleBuilder;
 import com.google.inject.Key;
+import java.util.concurrent.ExecutorService;
 
 public class ObjectStoreModule extends AbstractModule {
     @Override
@@ -24,5 +25,7 @@ public class ObjectStoreModule extends AbstractModule {
         install(new FactoryModuleBuilder()
                 .implement(ObjectStore.class, ArtifactoryObjectStore.class)
                 .build(ArtifactoryObjectStore.Factory.class));
+
+        requireBinding(ExecutorService.class);
     }
 }

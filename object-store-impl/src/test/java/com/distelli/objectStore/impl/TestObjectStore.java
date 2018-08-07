@@ -38,6 +38,9 @@ import org.junit.rules.TestName;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized.Parameters;
 import org.junit.runners.Parameterized;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.hamcrest.CoreMatchers.*;
 import static org.junit.Assert.*;
@@ -45,7 +48,20 @@ import static org.junit.Assert.*;
 @RunWith(Parameterized.class)
 public class TestObjectStore {
     private static Injector INJECTOR = Guice.createInjector(
-        new ObjectStoreModule());
+        new ObjectStoreModule(),
+        new AbstractModule() {
+            protected void configure() {
+                ExecutorService executor = Executors.newFixedThreadPool(10);
+
+                bind(ExecutorService.class).toInstance(executor);
+                Runtime.getRuntime().addShutdownHook(new Thread() {
+                        @Override
+                        public void run() {
+                            shutdownAndAwaitTermination(executor);
+                        }
+                    });
+            }
+        });
 
     @Parameters
     public static Collection<Object[]> parameters() {
@@ -54,6 +70,24 @@ public class TestObjectStore {
                 { ObjectStoreType.DISK },
                 { ObjectStoreType.ARTIFACTORY }
             });
+    }
+
+    private static void shutdownAndAwaitTermination(ExecutorService pool) {
+        pool.shutdown(); // Disable new tasks from being submitted
+        try {
+            // Wait a while for existing tasks to terminate
+            if (!pool.awaitTermination(60, TimeUnit.SECONDS)) {
+                pool.shutdownNow(); // Cancel currently executing tasks
+                // Wait a while for tasks to respond to being cancelled
+                if (!pool.awaitTermination(60, TimeUnit.SECONDS))
+                    System.err.println("Pool did not terminate");
+            }
+        } catch (InterruptedException ie) {
+            // (Re-)Cancel if current thread also interrupted
+            pool.shutdownNow();
+            // Preserve interrupt status
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Inject
@@ -333,6 +367,8 @@ TODO: Use http-client to do a request:
                 objectStore.delete(key);
             }
             key.setKey("test-list-foo");
+            objectStore.delete(key);
+            key.setKey("test-xxx");
             objectStore.delete(key);
         }
     }
