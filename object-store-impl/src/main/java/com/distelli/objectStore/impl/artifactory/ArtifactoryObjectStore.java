@@ -326,7 +326,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
                     .build();
                 writer.writeObject(content);
             }
-            bodyOS.write(").include(\"path\",\"name\")"
+            bodyOS.write(").include(\"repo\",\"path\",\"name\")"
                          .getBytes(UTF_8));
             // Not supported in OS edition of Artifactory:
             // ".sort({\"$asc\":[\"path\", \"name\"]})"
