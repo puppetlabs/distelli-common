@@ -25,6 +25,13 @@ public interface ObjectStore {
     }
     public interface Factory {
         public Builder create();
+        /**
+         * Create an `ObjectKey` with the default bucket and a possible
+         * key prefix prepended.
+         */
+        public default ObjectKey createKey(String key) {
+            throw new MissingObjectStoreConfigException("No ObjectStore configuration is defined.");
+        }
     }
 
     public void createBucket(String bucketName) throws AccessControlException;

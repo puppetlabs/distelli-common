@@ -390,12 +390,12 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
     }
 
     private static Long getLong(JsonObject obj, String field) {
-        if ( null == obj ) return null;
+        if ( null == obj || ! obj.containsKey(field) ) return null;
         JsonNumber num;
         try {
             num = obj.getJsonNumber(field);
         } catch ( ClassCastException ex ) {
-            String str = obj.getString(field);
+            String str = getString(obj, field);
             if ( null == str ) return null;
             try {
                 return Long.parseLong(str);
@@ -408,7 +408,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
     }
 
     private static String getString(JsonObject obj, String field) {
-        if ( null == obj ) return null;
+        if ( null == obj || ! obj.containsKey(field) ) return null;
         try {
             return obj.getString(field);
         } catch ( ClassCastException ex ) {
@@ -420,7 +420,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
         if ( null == arr ) return null;
         try {
             return arr.getString(idx);
-        } catch ( ClassCastException ex ) {
+        } catch ( IndexOutOfBoundsException|ClassCastException ex ) {
             return null;
         }
     }
@@ -429,7 +429,7 @@ public class ArtifactoryObjectStore extends AbstractObjectStore
         if ( null == arr ) return null;
         try {
             return arr.getJsonObject(idx);
-        } catch ( ClassCastException ex ) {
+        } catch ( IndexOutOfBoundsException|ClassCastException ex ) {
             return null;
         }
     }
