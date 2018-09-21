@@ -11,7 +11,11 @@ import javax.inject.Inject;
 import javax.servlet.DispatcherType;
 import javax.servlet.http.HttpServlet;
 import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.server.Connector;
+import org.eclipse.jetty.server.NetworkConnector;
+import java.util.Collection;
+import java.util.Arrays;
+import java.util.Objects;
 import org.eclipse.jetty.server.handler.AllowSymLinkAliasChecker;
 import org.eclipse.jetty.server.handler.ErrorHandler;
 import org.eclipse.jetty.servlet.DefaultServlet;
@@ -78,7 +82,32 @@ public class GuiceWebServer implements Runnable {
 
     public void run(String portStr) {
         int port = (null == portStr) ? 8080 : Integer.parseInt(portStr);
+        Server server = createServer(port);
+        try {
+            server.start();
+            LOG.info("Listening on port {}", getPort(server));
+            server.join();
+        } catch ( RuntimeException ex ) {
+            throw ex;
+        } catch ( Exception ex ) {
+            throw new RuntimeException(ex);
+        }
+    }
 
+    public static int getPort(Server server) {
+        Connector[] connectors = server.getConnectors();
+        if ( null == connectors || connectors.length < 1 ) {
+            return 0;
+        }
+        return Arrays.asList(connectors).stream()
+            .map(connector ->
+                 ( connector instanceof NetworkConnector ) ? ((NetworkConnector)connector).getLocalPort() : null)
+            .filter(Objects::nonNull)
+            .findFirst()
+            .orElse(0);
+    }
+
+    public Server createServer(int port) {
         ErrorPageErrorHandler errorHandler = new ErrorPageErrorHandler();
         errorHandler.addErrorPage(404, "/404");
         ServletContextHandler context = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
@@ -107,15 +136,6 @@ public class GuiceWebServer implements Runnable {
 
         Server server = new Server(port);
         server.setHandler(context);
-
-        try {
-            server.start();
-            LOG.info("Listening on port {}", port);
-            server.join();
-        } catch ( RuntimeException ex ) {
-            throw ex;
-        } catch ( Exception ex ) {
-            throw new RuntimeException(ex);
-        }
+        return server;
     }
 }
