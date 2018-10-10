@@ -73,6 +73,9 @@ public class GenericRouteMatcher<T>
     public GenericMatchedRoute<T> match(HTTPMethod httpMethod, String path) {
         GenericMatchedRoute<T> result =
             match(root, toComponents(httpMethod, path), new ArrayList<>());
+        if ( null == result && HTTPMethod.HEAD == httpMethod ) {
+            result = match(root, toComponents(HTTPMethod.GET, path), new ArrayList<>());
+        }
         if ( null != result ) {
             if ( LOG.isDebugEnabled() ) LOG.debug("Route matched: "+result);
             return result;
