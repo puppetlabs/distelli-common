@@ -1,12 +1,12 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.distelli.webserver</groupId>
-  <artifactId>distelli-webserver</artifactId>
+  <groupId>com.distelli.webserver.proxy</groupId>
+  <artifactId>jetty-proxy</artifactId>
   <version>9.19.3-SNAPSHOT</version>
   <packaging>jar</packaging>
 
-  <name>distelli-webserver</name>
+  <name>jetty-proxy</name>
 
   <parent>
     <groupId>com.distelli.common</groupId>
@@ -52,27 +52,36 @@
     </dependency>
 
     <dependency>
+      <groupId>com.distelli.run</groupId>
+      <artifactId>GuiceRunner</artifactId>
+      <version>9.19.3-SNAPSHOT</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-log4j12</artifactId>
+      <version>1.7.5</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
       <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-servlet</artifactId>
+      <artifactId>jetty-proxy</artifactId>
       <version>9.4.12.v20180830</version>
     </dependency>
 
     <dependency>
       <groupId>org.eclipse.jetty.websocket</groupId>
-      <artifactId>websocket-servlet</artifactId>
+      <artifactId>websocket-client</artifactId>
       <version>9.4.12.v20180830</version>
     </dependency>
 
     <dependency>
-      <groupId>com.fasterxml.jackson.core</groupId>
-      <artifactId>jackson-databind</artifactId>
-      <version>${jackson.version}</version>
-    </dependency>
-
-    <dependency>
-      <groupId>com.fasterxml.jackson.module</groupId>
-      <artifactId>jackson-module-mrbean</artifactId>
-      <version>${jackson.version}</version>
+      <groupId>org.eclipse.jetty.websocket</groupId>
+      <artifactId>websocket-server</artifactId>
+      <version>9.4.12.v20180830</version>
+      <scope>runtime</scope>
     </dependency>
 
     <dependency>
@@ -88,6 +97,12 @@
     </dependency>
 
     <dependency>
+      <groupId>com.distelli.webserver</groupId>
+      <artifactId>distelli-webserver</artifactId>
+      <version>9.19.3-SNAPSHOT</version>
+    </dependency>
+
+    <dependency>
       <groupId>com.distelli.utils</groupId>
       <artifactId>Utilities</artifactId>
       <version>9.19.3-SNAPSHOT</version>
@@ -95,14 +110,14 @@
 
     <dependency>
       <groupId>com.google.inject.extensions</groupId>
-      <artifactId>guice-assistedinject</artifactId>
+      <artifactId>guice-multibindings</artifactId>
       <version>${guice.version}</version>
     </dependency>
 
     <dependency>
-      <groupId>org.msgpack</groupId>
-      <artifactId>jackson-dataformat-msgpack</artifactId>
-      <version>0.8.7</version>
+      <groupId>com.google.inject.extensions</groupId>
+      <artifactId>guice-assistedinject</artifactId>
+      <version>${guice.version}</version>
     </dependency>
 
   </dependencies>

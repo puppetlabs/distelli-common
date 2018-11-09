@@ -20,5 +20,6 @@ public enum HTTPMethod
     PROXY,
     PUT,
     TRACE,
-    PATCH;
+    PATCH,
+    WEBSOCKET;
 }

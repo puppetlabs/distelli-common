@@ -87,7 +87,8 @@ public class GenericRouteMatcher<T>
             .withHTTPMethod(httpMethod)
             .withValue(defaultValue)
             .build(),
-            Collections.emptyMap());
+            Collections.emptyMap(),
+            true);
     }
 
 
@@ -101,7 +102,8 @@ public class GenericRouteMatcher<T>
             }
             return new GenericMatchedRoute<T>(
                 node.routeSpec,
-                Collections.unmodifiableMap(params));
+                Collections.unmodifiableMap(params),
+                false);
         }
         if ( null == node.paths ) {
             return null;

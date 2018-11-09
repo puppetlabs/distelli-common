@@ -10,6 +10,8 @@ import java.util.Set;
 import javax.inject.Inject;
 import javax.servlet.DispatcherType;
 import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.NetworkConnector;
@@ -24,8 +26,11 @@ import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
+import org.eclipse.jetty.server.Dispatcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.eclipse.jetty.server.Request;
+import java.io.IOException;
 
 public class GuiceWebServer implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(GuiceWebServer.class);
@@ -34,8 +39,13 @@ public class GuiceWebServer implements Runnable {
         if ( LOG.isDebugEnabled() ) {
             LOG.debug("Dispatching to static servlet {} with response={}", req.getRequestURI(), res);
         }
-        req.getServletContext().getNamedDispatcher(STATIC_SERVLET_NAME)
-        .forward(req, res);
+        try {
+            req.getServletContext()
+                .getNamedDispatcher(STATIC_SERVLET_NAME)
+                .forward(req, res);
+        } catch ( Exception ex ) {
+            LOG.error("Error during static dispatch: "+ex.getMessage(), ex);
+        }
     };
 
     private GenericRouteMatcher<GenericRequestHandler> routeMatcher;
@@ -108,14 +118,26 @@ public class GuiceWebServer implements Runnable {
     }
 
     public Server createServer(int port) {
-        ErrorPageErrorHandler errorHandler = new ErrorPageErrorHandler();
-        errorHandler.addErrorPage(404, "/404");
         ServletContextHandler context = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
-        context.setErrorHandler(errorHandler);
+        RouteMatcherServlet routeMatcherServlet = new RouteMatcherServlet(routeMatcher);
+        context.setErrorHandler(new ErrorHandler() {
+                @Override
+                public void handle(String target, Request jettyRequest, HttpServletRequest request, HttpServletResponse response) throws IOException {
+                    Object codeObj = request.getAttribute(Dispatcher.ERROR_STATUS_CODE);
+                    Integer code = (codeObj instanceof Integer) ? (Integer)codeObj : null;
+                    try {
+                        if ( ! routeMatcherServlet.serviceError(code, request, response) ) {
+                            super.handle(target, jettyRequest, request, response);
+                        }
+                    } catch ( javax.servlet.ServletException ex ) {
+                        throw new RuntimeException(ex);
+                    }
+                }
+            });
         context.setContextPath("/");
         context.addAliasCheck(new AllowSymLinkAliasChecker());
 
-        ServletHolder servletHolder = new ServletHolder(new RouteMatcherServlet(routeMatcher));
+        ServletHolder servletHolder = new ServletHolder(routeMatcherServlet);
         context.addServlet(servletHolder, "/*");
 
         ServletHolder staticHolder = new ServletHolder(STATIC_SERVLET_NAME, DefaultServlet.class);

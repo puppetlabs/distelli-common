@@ -25,6 +25,7 @@
     <module>object-store-impl</module>
     <module>task-monitor-impl</module>
     <module>distelli-webserver</module>
+    <module>jetty-proxy</module>
     <module>utils</module>
     <module>guice-runner</module>
   </modules>
