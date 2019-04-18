@@ -27,6 +27,11 @@ public class MacInputStream extends FilterInputStream {
     }
 
     @Override
+    public int read(byte[] buff) throws IOException {
+        return read(buff, 0, buff.length);
+    }
+
+    @Override
     public int read(byte[] buff, int off, int len) throws IOException {
         int result = in.read(buff, off, len);
         if ( null != _mac && result > 0 ) {

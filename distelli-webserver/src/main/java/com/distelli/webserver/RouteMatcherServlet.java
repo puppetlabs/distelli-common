@@ -93,7 +93,7 @@ public class RouteMatcherServlet extends WebSocketServlet {
         if ( null == route || route.isDefaultRoute() ) {
             return false;
         }
-
+        request.setAttribute(MATCHED_ROUTE, route);
 
         if ( upgradeRequest ) {
             request.setAttribute(GenericRequestHandler.class.getName(), route.getValue());
