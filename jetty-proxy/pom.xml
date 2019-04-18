@@ -3,7 +3,7 @@
 
   <groupId>com.distelli.webserver.proxy</groupId>
   <artifactId>jetty-proxy</artifactId>
-  <version>10.0.2</version>
+  <version>10.0.3-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <name>jetty-proxy</name>
@@ -11,7 +11,7 @@
   <parent>
     <groupId>com.distelli.common</groupId>
     <artifactId>distelli-common-pom</artifactId>
-    <version>10.0.2</version>
+    <version>10.0.3-SNAPSHOT</version>
   </parent>
 
   <build>
@@ -54,7 +54,7 @@
     <dependency>
       <groupId>com.distelli.run</groupId>
       <artifactId>GuiceRunner</artifactId>
-      <version>10.0.2</version>
+      <version>10.0.3-SNAPSHOT</version>
       <scope>test</scope>
     </dependency>
 
@@ -99,13 +99,13 @@
     <dependency>
       <groupId>com.distelli.webserver</groupId>
       <artifactId>distelli-webserver</artifactId>
-      <version>10.0.2</version>
+      <version>10.0.3-SNAPSHOT</version>
     </dependency>
 
     <dependency>
       <groupId>com.distelli.utils</groupId>
       <artifactId>Utilities</artifactId>
-      <version>10.0.2</version>
+      <version>10.0.3-SNAPSHOT</version>
     </dependency>
 
     <dependency>
