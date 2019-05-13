@@ -39,6 +39,14 @@ public class GuiceWebServer implements Runnable {
         if ( LOG.isDebugEnabled() ) {
             LOG.debug("Dispatching to static servlet {} with response={}", req.getRequestURI(), res);
         }
+        // The default servlet likes to forward requests which will result
+        // in a stack overflow. Avoid this:
+        if ( null == req.getAttribute(GuiceWebServer.class.getName()) ) {
+            req.setAttribute(GuiceWebServer.class.getName(), Boolean.TRUE);
+        } else {
+            res.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return;
+        }
         try {
             req.getServletContext()
                 .getNamedDispatcher(STATIC_SERVLET_NAME)
